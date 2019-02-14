@@ -1,0 +1,535 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+"""
+version:2.6
+by:lss
+"""
+
+import numpy as np
+import pandas as pd
+import sys
+reload(sys)
+sys.setdefaultencoding("utf8")
+import os
+import re
+
+def append_sample_gender_excel(excel):
+    dataframe = pd.read_excel(excel, dtype=str)
+    ID = []
+    for i in range(len(dataframe[u'原始样本ID'])):
+        if dataframe[u'原始样本ID'][i] == 'nan':
+            ID.append(dataframe.iloc[i][u'样本编号'])
+        else:
+            ID.append(dataframe.iloc[i][u'原始样本ID'])
+    #for i in range(len(dataframe[u'原始样本ID'].isnull())):
+    #    if dataframe[u'原始样本ID'].isnull()[i]:
+    #        ID.append(dataframe.iloc[i][u'样本编号'])
+    #    else:
+    #        ID.append(dataframe.iloc[i][u'原始样本ID'])
+    dataframe['sample'] = ID
+    dataframe['gender'] = dataframe[u'性别'].apply(lambda x:'1' if u'男' in x else '2')
+    return dataframe
+def append_relation(dataframe):
+    dataframe.index = dataframe[u'姓名']
+    if 'relationship' not in dataframe.columns:
+        dataframe['relationship'] = None
+        pedigree_dict = generate_pedigree(dataframe)
+        trio = generate_trio(pedigree_dict)
+        for i in dataframe.index:
+            for j in trio:
+                if j in i:
+                    if j == i:
+                        dataframe.loc[i,'relationship'] = u'子'
+                    #elif re.match(j+u'父',i):    # the regular expression has a bug
+                    #    dataframe.loc[i]['relationship'] == u'父'
+                    #elif re.match(j+u'母',i):
+                    #    dataframe.loc[i]['relationship'] == u'母'
+                    #elif j+u'父' == i:
+                    #    dataframe.loc[i,'relationship'] = u'父'
+                    #elif j+u'母' ==  i:
+                    #    dataframe.loc[i,'relationship'] = u'母'
+                    elif u'父' in i:
+                        dataframe.loc[i,'relationship'] = u'父'  #there is no u'父' in i
+                    elif u'母' in  i:
+                        dataframe.loc[i,'relationship'] = u'母'  #there is no u'母' in i
+                    else:
+                        dataframe.loc[i,'relationship'] = 'other'
+    dataframe[u'家系关系'] = None
+    dataframe[u'家系关系'] = dataframe['relationship']
+    return dataframe
+def append_pedigree(dataframe):
+    pedigree_dict = generate_pedigree(dataframe)
+    dataframe.index = dataframe[u'姓名']
+    if 'pedigree' not in dataframe.columns:
+        dataframe['pedigree'] = None
+        for i in dataframe.index:
+            for k in pedigree_dict:
+                if k in i:  # the name of the child should be totally included in other family member's names
+                    dataframe.loc[i]['pedigree'] = 'fam'+dataframe.loc[k]['sample']
+        dataframe[u'样本间关系'] = None
+        dataframe[u'样本间关系'] = dataframe['pedigree']
+    else:
+        dataframe[u'样本间关系'] = None
+        for i in dataframe.index:
+            for k in pedigree_dict:
+                if dataframe.loc[i]['pedigree'] == dataframe.loc[k]['pedigree']:
+                    dataframe.loc[i][u'样本间关系'] = 'fam'+dataframe.loc[k]['sample']
+    return dataframe                    
+def generate_pedigree(dataframe):
+    pedigree = {}
+    if 'pedigree' not in dataframe.columns:
+    #if 'pedigree' not in dataframe.columns or 'pedigree' in dataframe.columns and dataframe['relationship'] == 'nan':
+#################################################        
+        dataframe.index = dataframe[u'姓名']
+        for i in dataframe[u'姓名']:
+            pedigree[i] = []
+        for k in pedigree:
+            for i in dataframe[u'姓名']:
+                if k in i: # the name of the child should be totally included in other family member's names
+                    pedigree[k].append(i)
+        for k in list(pedigree.keys()):
+            if len(pedigree[k]) == 1:
+                pedigree.pop(k)
+    elif 'pedigree' in dataframe.columns and 'relationship' in dataframe.columns:
+        if not dataframe['relationship'].isnull().all():
+            dataframe.index = dataframe['relationship']
+            #col = dataframe.columns[2] # when the format of the file is not excel, it will produce error
+            for i in range(len(dataframe['relationship'])):
+                if dataframe['relationship'][i] == u'子':
+                    if dataframe['pedigree'][i] != 'nan':
+                        key =  dataframe.iloc[i][u'姓名']
+                        #key = dataframe.loc[i][col]
+                        pedigree[key] = []
+            dataframe.index = dataframe[u'姓名']
+            #dataframe.index = dataframe[col]
+            for k in pedigree:
+                for i in dataframe[u'姓名']:
+                #for i in dataframe[col]:
+                    if dataframe.loc[i]['pedigree'] == dataframe.loc[k]['pedigree']:
+                        pedigree[k].append(i)
+    return pedigree
+def generate_trio(pedigree_dict):
+    trio = []
+    for k in pedigree_dict:
+        trio.append(k)
+    return trio
+def generate_single(dataframe):
+    pedigree_dict = generate_pedigree(dataframe)
+    trio = generate_trio(pedigree_dict)
+    trio_m = []
+    for i in dataframe[u'姓名']:
+        for k in pedigree_dict:
+            trio_m.extend(pedigree_dict[k])
+    single = [i for i in dataframe[u'姓名'] if i not in trio_m]
+    return single
+def append_phenotype(dataframe):
+    pedigree_dict = generate_pedigree(dataframe)
+    trio = generate_trio(pedigree_dict)
+    single = generate_single(dataframe)
+    dataframe['phenotype1'] = '0'
+    dataframe['phenotype2'] = None
+    #dataframe.index = dataframe['relationship']
+    #for i in dataframe['relationship']:
+    #    if i == u'子':
+    #        dataframe.loc[i,'phenotype2'] = '2'
+    #    else:
+    #        dataframe.loc[i,'phenotype2'] = '1'
+    #dataframe.index = dataframe[u'姓名']
+    for i in dataframe.index:
+        if i in trio:
+            dataframe.loc[i,'phenotype2'] = '2'
+        elif i in single:
+            dataframe.loc[i,'phenotype2'] = '2'
+        else:
+            dataframe.loc[i,'phenotype2'] = '1'
+    return dataframe
+def append_father_mother(dataframe):
+    d1 = dataframe
+    if 'father' not in dataframe.columns:
+        #d1['father'] = None
+        #d1['mother'] = None
+        d1['father'] = '0'
+        d1['mother'] = '0'
+        pedigree_dict = generate_pedigree(d1)
+        trio = generate_trio(pedigree_dict)
+        single = generate_single(d1)
+        for i in trio:
+            relation = []
+            for j in pedigree_dict[i]:
+                relation.append(d1.loc[j]['relationship'])
+            a = ' '.join(relation)
+            for j in d1.index:
+                if j in pedigree_dict[i]:
+                    if u'父' in a and u'母' in a: 
+                        if j == i:
+                            for k in pedigree_dict[i]:
+                                if u'父' in k:
+                                    father_name = k
+                                if u'母' in k:
+                                    mother_name = k
+                            d1.loc[j]['father'] = d1.loc[father_name]['sample']
+                            d1.loc[j]['mother'] = d1.loc[mother_name]['sample']
+                        else:
+                            if len(pedigree_dict[i]) == 3:
+                                d1.loc[j]['father'] = '0'
+                                d1.loc[j]['mother'] = '0'
+                            else:
+                                #father = raw_input('father name of '+j+'(if not exist, please enter 0):')
+                                #if not isinstance(father, unicode):
+                                #    father = unicode(father, 'utf-8')
+                                ##print d1.loc[father]
+                                #try:
+                                #    d1.loc[j]['father'] = d1.loc[father]['sample']
+                                #except:
+                                #    d1.loc[j]['father'] = '0'
+                                #mother = raw_input('mother name of '+j+'(if not exist, please enter 0):')
+                                #if not isinstance(mother, unicode):
+                                #    mother = unicode(mother, 'utf-8')
+                                #try: 
+                                #    d1.loc[j]['mother'] = d1.loc[mother]['sample']
+                                #except:
+                                #    d1.loc[j]['mother'] = '0'
+                                if u'姐' in j or u'妹' in j or u'哥' in j or u'弟' in j:
+                                    for k in pedigree_dict[i]:
+                                        if u'父' in k:
+                                            father_name = k
+                                        if u'母' in k:
+                                            mother_name = k
+                                    d1.loc[j]['father'] = d1.loc[father_name]['sample']
+                                    d1.loc[j]['mother'] = d1.loc[mother_name]['sample']
+                                elif u'爷' not in a and u'奶' not in a and u'外婆' not in a and u'外公' not in a:
+                                    if u'父' in j:
+                                        d1.loc[j]['father'] = '0'
+                                        d1.loc[j]['mother'] = '0'
+                                    if u'母' in j:
+                                        d1.loc[j]['father'] = '0'
+                                        d1.loc[j]['mother'] = '0'
+                                else:
+                                    father = raw_input('father ID of '+j+'(if not exist, please enter 0):')
+                                    try:
+                                        d1.loc[j]['father'] = father
+                                    except:
+                                        d1.loc[j]['father'] = '0'
+                                    mother = raw_input('mother ID of '+j+'(if not exist, please enter 0):')
+                                    try: 
+                                        d1.loc[j]['mother'] = mother
+                                    except:
+                                        d1.loc[j]['mother'] = '0'
+                    else:
+                        #father = raw_input('father name of '+j+'(if not exist, please enter 0):')
+                        #if not isinstance(father, unicode):
+                        #    father = unicode(father, 'utf-8')
+                        #try:
+                        #    d1.loc[j]['father'] = d1.loc[father]['sample']
+                        #except:
+                        #    d1.loc[j]['father'] = u'0'
+                        #mother = raw_input('mother name of '+j+'(if not exist, please enter 0):')
+                        #if not isinstance(mother, unicode):
+                        #    mother = unicode(mother, 'utf-8')
+                        #try:
+                        #    d1.loc[j]['mother'] = d1.loc[mother]['sample']
+                        #except:
+                        #    d1.loc[j]['mother'] = u'0'
+                        if j == i:
+                            if u'父' in a:
+                                    for k in pedigree_dict[i]:
+                                        if u'父' in k:
+                                            father_name = k
+                                    d1.loc[j]['father'] = d1.loc[father_name]['sample']
+                            if u'母' in a:
+                                    for k in pedigree_dict[i]:
+                                        if u'父' in k:
+                                            mother_name = k
+                                    d1.loc[j]['mother'] = d1.loc[mother_name]['sample']
+
+                        elif u'父' in j:
+                            if u'爷' not in a and u'奶' not in a and u'外婆' not in a and u'外公' not in a:
+                                d1.loc[j]['father'] = '0'
+                                d1.loc[j]['mother'] = '0'
+                        elif u'母' in j:
+                            if u'爷' not in a and u'奶' not in a and u'外婆' not in a and u'外公' not in a:
+                                d1.loc[j]['father'] = '0'
+                                d1.loc[j]['mother'] = '0'
+############################################################################################
+                        else:
+                            father = raw_input('father ID of '+j+'(if not exist, please enter 0):')
+                            try:
+                                d1.loc[j]['father'] = father
+                            except:
+                                d1.loc[j]['father'] = '0'
+                            mother = raw_input('mother ID of '+j+'(if not exist, please enter 0):')
+                            try: 
+                                d1.loc[j]['mother'] = mother
+                            except:
+                                d1.loc[j]['mother'] = '0'
+    return d1
+def generate_sinle_ped(k,d):
+    d.index = d['sample']
+    ped_mendel = d.loc[k][['sample', 'father', 'mother', 'gender', 'phenotype2']]
+    fname = d.loc[k]['sample']+'/'+d.loc[k]['sample']+'.mendel.ped'
+    ped = open(fname, 'w')
+    ped.write(d.loc[k]['sample']+'\t'+'\t'.join(ped_mendel)+'\n')
+    ped.close()
+    d.index = d[u'姓名']
+def generate_ped(k,d):
+    pedigree_dict = generate_pedigree(d)
+    ped_f = d.loc[pedigree_dict[k]][['sample', 'father', 'mother', 'gender', 'phenotype1']]
+    ped_f.index = ped_f['sample']
+    ped_mendel = d.loc[pedigree_dict[k]][['sample', 'father', 'mother', 'gender', 'phenotype2']]
+    ped_mendel.index = ped_mendel['sample']
+    f1name = 'trio/ped/'+d.loc[k]['sample']+'.ped'
+    f2name = 'trio/ped/'+d.loc[k]['sample']+'.mendel.ped'
+    ped1 = open(f1name, 'w')
+    ped2 = open(f2name, 'w')
+    relation = []
+    for i in pedigree_dict[k]:
+        relation.append(d.loc[i]['relationship'])
+    a = ' '.join(relation)
+    key1 = d.loc[k]['sample']
+    ped1.write(key1+'\t'+'\t'.join(ped_f.loc[key1])+'\n')
+    ped2.write(key1+'\t'+'\t'.join(ped_mendel.loc[key1])+'\n')
+    if u'父' in a and u'母' in a:
+        #for i in pedigree_dict[k]:
+        #    for j in [u'父', u'母']:
+        for j in [u'父', u'母']:
+            for i in pedigree_dict[k]:
+                if i != k and j in i:
+                    key2 = d.loc[i]['sample']
+                    ped1.write(key1+'\t'+'\t'.join(ped_f.loc[key2])+'\n')
+                    ped2.write(key1+'\t'+'\t'.join(ped_mendel.loc[key2])+'\n')
+    	n_c_f_m = [i for i in pedigree_dict[k] if u'父' not in i and u'母' not in i and i != k]
+        for i in n_c_f_m:
+            key2 = d.loc[i]['sample']
+            ped1.write(key1+'\t'+'\t'.join(ped_f.loc[key2])+'\n')
+            ped2.write(key1+'\t'+'\t'.join(ped_mendel.loc[key2])+'\n')
+    elif u'父' in a or u'母' in a:
+        parent = ''
+        if u'父' in a:
+            parent = u'父'
+        else:
+            parent = u'母'
+        for i in pedigree_dict[k]:
+            if parent in i and i != k:
+                key2 = d.loc[i]['sample']
+                ped1.write(key1+'\t'+'\t'.join(ped_f.loc[key2])+'\n')
+                ped2.write(key1+'\t'+'\t'.join(ped_mendel.loc[key2])+'\n')
+        n_c_f_m = [i for i in pedigree_dict[k] if parent not in i and i != k]
+        for i in n_c_f_m:
+            key2 = d.loc[i]['sample']
+            ped1.write(key1+'\t'+'\t'.join(ped_f.loc[key2])+'\n')
+            ped2.write(key1+'\t'+'\t'.join(ped_mendel.loc[key2])+'\n')
+    else:
+    	n_c = [i for i in pedigree_dict[k] if i != k]
+    	for i in n_c:
+    	    key2 = d.loc[i]['sample']
+    	    ped1.write(key1+'\t'+'\t'.join(ped_f.loc[key2])+'\n')
+    	    ped2.write(key1+'\t'+'\t'.join(ped_mendel.loc[key2])+'\n')
+    ped1.close()
+    ped2.close()
+def generate_peddy(trio,d):
+    peddy = open('trio/ped/peddy.ped', 'a')
+    peddy_ID = '0'
+    for i in trio:
+        trio_ID = d.loc[i]['sample']
+        with open('trio/ped/'+trio_ID+'.mendel.ped') as f:
+            for l in f:
+                l = l.strip('\n').split(' ')
+                peddy.write(peddy_ID+'\t'+'\t'.join(l[1:])+'\n')
+    peddy.close()
+
+def generate_trio_list(trio, dataframe):
+    child = []
+    for i in trio:
+        child.append(dataframe.loc[i]['sample'])
+    ofile = open('trio/list', 'a')
+    for i in child:
+    	ofile.write(i+'\n')
+    ofile.write('peddy\n')
+    ofile.close()
+
+def generate_cmd(path):
+    os.system('cp /DATA/sslyu/trio_BWA-GATK_3.0/cmd.sh '+path)
+
+def generate_single_cmd_step1(path):
+    single_cmd_step1 = open(path+'/cmd_step1.sh', 'w')
+    single_cmd_step1.write('#!/bin/sh\n\n#SBATCH -J jobname\n#SBATCH -p BP10\n#SBATCH -N 1\n#SBATCH -n 4\n\nsample=list\n\nsh run2_sentieon_step1.sh $sample $SLURM_NPROCS')
+    single_cmd_step1.write('sed -n \'2p\' peddy.sex_check.csv |awk -F\',\' \'{if($1=="True"){print "sex of '+path+' is wrong"}}\' >> ../sex_check_log\n')
+    single_cmd_step1.close()
+def generate_single_cmd_step2(path):
+    single_cmd_step2 = open(path+'/cmd_step2.sh', 'w')
+    single_cmd_step2.write('#!/bin/sh\n\n#SBATCH -J jobname\n#SBATCH -p BP10\n#SBATCH -N 1\n#SBATCH -n 4\n\nsample=list\n\nsh run2_sentieon_step2.sh $sample $SLURM_NPROCS\n')
+    single_cmd_step2.write('cp 2_mapping/$sample.depth.sample_gene_summary ../annotation\n')
+    single_cmd_step2.write('cp 3_variants/$sample.{ann.hg19_multianno.txt,CADD,maf,link} ../annotation\n')
+    single_cmd_step2.write('cd ../annotation\n')
+    single_cmd_step2.write('echo '+path+' >> list\n')
+    single_cmd_step2.write('python /DATA/sslyu/trio_BWA-GATK_3.0/annotation/score_re.py -sn $sample\n')
+    single_cmd_step2.write('python /DATA/sslyu/trio_BWA-GATK_3.0/annotation/annotation_filt_ver3.0.py -sn $sample\n')
+    single_cmd_step2.close()
+def generate_single_cmd(path):
+    single_cmd = open(path+'/cmd.sh', 'w')
+    with open('/DATA/sslyu/trio_BWA-GATK_3.0/cmd.sh') as f:
+        for l in f:
+            single_cmd.write(l)
+    single_cmd.write('cp 2_mapping/$sample.depth.sample_gene_summary ../annotation\n')
+    single_cmd.write('cp 3_variants/$sample.{ann.hg19_multianno.txt,CADD,maf,link} ../annotation\n')
+    single_cmd.write('cd ../annotation\n')
+    single_cmd.write('echo '+path+' >> list\n')
+    single_cmd.write('python /DATA/sslyu/trio_BWA-GATK_3.0/annotation/score_re.py -sn $sample\n')
+    single_cmd.write('python /DATA/sslyu/trio_BWA-GATK_3.0/annotation/annotation_filt_ver3.0.py -sn $sample\n')
+    single_cmd.close()
+	
+def generate_trio_cmd(path,filtmode):
+    trio_cmd = open(path+'/cmd.sh', 'w')
+    n = 0
+    with open('/DATA/sslyu/trio_BWA-GATK_3.0/trio/cmd.sh') as f:
+        for l in f:
+            n = n+1
+            if n<=22:
+                if n == 12:
+                    trio_cmd.write('filtmode=\''+filtmode+'\'\n')
+                else:
+                    trio_cmd.write(l)
+    return trio_cmd
+
+def generate_trio_cmd_merge(path,filtmode):
+    trio_cmd_merge = open(path+'/cmd_merge.sh', 'w')
+    n = 0
+    with open('/DATA/sslyu/trio_BWA-GATK_3.0/trio/cmd.sh') as f:
+        for l in f:
+            n = n+1
+            if n<=22:
+                if n == 12:
+                    trio_cmd_merge.write('filtmode=\''+filtmode+'\'\n')
+                elif n == 20:
+                    trio_cmd_merge.write('sh trio_peddy_merge.sh $sample $SLURM_NPROCS\n')
+                elif n == 22:
+                    trio_cmd_merge.write('sh trio_merge.sh $sample $SLURM_NPROCS $filtmode\n')
+                else:
+                    trio_cmd_merge.write(l)
+    return trio_cmd_merge
+
+def generate_dbevn(strategy):
+    dbevn = open('dbevn.sh', 'w')
+    if strategy != 'none':
+        with open('/DATA/sslyu/trio_BWA-GATK_3.0/dbevn.sh') as f:
+            for l in f:
+                if l.startswith('#panel'):
+                    if strategy in l:
+                        dbevn.write(l[1:])
+                    else:
+                        dbevn.write(l)
+                    #if strategy == 'Agilent':
+                    #	if strategy in l and 'Agilent_wes' not in l:
+                    #		dbevn.write(l[1:])
+                    #	else:
+                    #		dbevn.write(l)
+                    #else:
+                    #	if strategy in l:
+                    #		dbevn.write(l[1:])
+                    #	else:
+                    #		dbevn.write(l)
+                else:
+                	dbevn.write(l)
+    else:
+        with open('/DATA/sslyu/trio_BWA-GATK_3.0/dbevn.sh') as f:
+            for l in f:
+                dbevn.write(l)
+        panel = raw_input('please enter the absolute path of the bed:')
+        dbevn.write('panel=\"'+panel+'\"\n')
+    dbevn.close()
+def generate_run2_sentieon(path,str):
+	run2_sentieon = open(path+'/run2_sentieon.sh', 'w')
+	n = 0
+	with open('/DATA/sslyu/trio_BWA-GATK_3.0/run2_sentieon.sh') as f:
+		for l in f:
+			n = n+1
+			if n>0 and n<= 23:
+				run2_sentieon.write(l)
+			elif n>= 25:
+				run2_sentieon.write(l)
+			elif n==24:
+				run2_sentieon.write('cmd="'+str+'"\n')
+			else:
+				continue
+	run2_sentieon.close()
+def generate_run2_sentieon_step1(path,str):
+	run2_sentieon_step1 = open(path+'/run2_sentieon_step1.sh', 'w')
+	n = 0
+	with open('/DATA/sslyu/trio_BWA-GATK_3.0/run2_sentieon.sh') as f:
+		for l in f:
+			n = n+1
+			if n>0 and n<= 23:
+				run2_sentieon_step1.write(l)
+			elif n>= 25:
+				run2_sentieon_step1.write(l)
+			elif n==24:
+				run2_sentieon_step1.write('cmd="'+str+'"\n')
+			else:
+				continue
+	run2_sentieon_step1.close()
+def generate_run2_sentieon_step2(path,str):
+	run2_sentieon_step2 = open(path+'/run2_sentieon_step2.sh', 'w')
+	n = 0
+	with open('/DATA/sslyu/trio_BWA-GATK_3.0/run2_sentieon.sh') as f:
+		for l in f:
+			n = n+1
+			if n>0 and n<= 23:
+				run2_sentieon_step2.write(l)
+			elif n>= 25:
+				run2_sentieon_step2.write(l)
+			elif n==24:
+				run2_sentieon_step2.write('cmd="'+str+'"\n')
+			else:
+				continue
+	run2_sentieon_step2.close()
+def generate_annotation(dataframe):
+    pedigree_dict = generate_pedigree(dataframe)
+    trio = generate_trio(pedigree_dict)
+    single = generate_single(dataframe)
+    if not os.path.exists('annotation'):
+        os.makedirs('annotation')
+    ofile = open('step3_annotation.sh', 'a')
+    if len(trio) > 0:
+        ofile1 = open('annotation/list', 'a')
+        ofile2 = open('annotation/list_n_c_f_m', 'a')
+        for i in trio:
+            ID = dataframe.loc[i]['sample']
+            ofile.write('mv '+ID+'/2_mapping/'+ID+'.depth.sample_gene_summary annotation\n')
+            ofile.write('mv trio/'+ID+'/segtrio/'+ID+'.{ann*,CADD,link,maf} annotation\n')
+            relation = []
+            for j in pedigree_dict[i]:
+                relation.append(dataframe.loc[j]['relationship'])
+            a = ' '.join(relation)
+            if u'父' in a and u'母' in a:
+                ofile1.write(ID+'\n')
+            else:
+                ofile2.write(ID+'\n')
+        ofile1.close()
+        ofile2.close()
+    if os.path.exists('annotation/list_n_c_f_m'):
+        if os.path.getsize('annotation/list_n_c_f_m') == 0:
+            os.system('rm annotation/list_n_c_f_m')
+    if os.path.exists('annotation/list'):
+        if os.path.getsize('annotation/list') == 0:
+            os.system('rm annotation/list')
+    if len(single) > 0:
+        if os.path.exist('annotation/list_n_c_f_m'):
+            ofile3 = open('annotation/list_n_c_f_m', 'a')
+        else:
+            ofile3 = open('annotation/list', 'a')
+        for i in single:
+            ID = dataframe.loc[i]['sample']
+            ofile.write('mv '+ID+'/2_mapping/'+ID+'.depth.sample_gene_summary annotation\n')
+            ofile.write('mv '+ID+'/3_variants/'+ID+'.{ann*,CADD,link,maf} annotation\n')
+            ofile3.write(ID+'\n')
+        ofile3.close()
+    ofile.write('cd annotation\n')
+    if os.path.exists('annotation/list_n_c_f_m'):
+        ofile.write('python /DATA/sslyu/trio_BWA-GATK_3.0/annotation/score_re.py -l list_n_c_f_m\n')
+        ofile.write('nohup python /DATA/sslyu/trio_BWA-GATK_3.0/annotation/annotation_filt_ver3.0.py -l list_n_c_f_m -c_f_m no &\n')
+    if os.path.exists('annotation/list'):
+        ofile.write('python /DATA/sslyu/trio_BWA-GATK_3.0/annotation/score_re.py -l list\n')
+        ofile.write('nohup python /DATA/sslyu/trio_BWA-GATK_3.0/annotation/annotation_filt_ver3.0.py -l list &\n')
+    ofile.write('cd ..\n')
+    ofile.close()
+

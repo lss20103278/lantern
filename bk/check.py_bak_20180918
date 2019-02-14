@@ -1,0 +1,243 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+#########################################################################
+# File Name: /DATA/sslyu/trio_BWA-GATK_2.7/check.py
+# Author: sslyu
+# mail: 1573077420@qq.com
+# Created Time:Wed 08 Aug 2018 01:46:07 PM CST
+#########################################################################
+
+import os
+import filecmp
+import sys
+reload(sys)
+sys.setdefaultencoding("utf8")
+import pandas as pd
+import numpy as np
+from prepare import *
+
+def list_file(rootDir):
+    all_file = []
+    for lists in os.listdir(rootDir):
+        path = os.path.join(rootDir, lists)
+        if os.path.isdir(path):
+            list_file(path)
+        else:
+            all_file.append(lists)
+    return all_file
+
+def find_file(start, name):
+    target_file = []
+    for relpath, dirs, files in os.walk(start):
+        if name in files:
+            full_path = os.path.join(start, relpath, name)
+            full_path = os.path.normpath(os.path.abspath(full_path))
+            target_file.append(full_path)
+    return target_file
+
+kwargs_raw = sys.argv[1:]
+kwargs={'-sn':'', '-l':''}
+for i in range(len(kwargs_raw)):
+    for j in kwargs.keys():
+        if(kwargs_raw[i]==j):
+            kwargs.update({j:kwargs_raw[i+1]})
+
+filelist = os.listdir('.')
+list = []
+for i in filelist:
+    if 'xlsx.tmp' in i:
+        list.append(i)
+        break
+    elif '分析任务单' in i:
+        list.append(i)
+    elif '产品信息表' in i:
+        list.append(i)
+
+#read sample list
+if(kwargs.get('-sn')!=''):
+    list=[]
+    list.append(kwargs.get('-sn'))
+    print "\nNote:sigle sample mode"
+else:
+    if kwargs.get('-l')!='':
+        list=pd.read_table(kwargs.get('-l'),header=None)[0].tolist()
+        print "\nNote:list samples mode"
+
+if len(list) != 0:
+    for sn in list:
+        print sn
+        if 'tmp' in sn:
+            d1 = pd.read_table(sn, dtype=str, encoding='utf-8')
+        else:
+            d1 = append_sample_gender_excel(sn)
+            #d1 = append_relation(d1)
+            #d1 = append_pedigree(d1)
+            #d1 = append_phenotype(d1)
+            #d1 = append_father_mother(d1)
+            d1.to_csv(sn+'.tmp', index=None, sep="\t", encoding='utf-8')
+        print d1
+        d1.index = range(len(d1['sample']))
+        md5_check = raw_input('Do you need to check the md5 of the copied files? If not, please enter no:')
+        if md5_check != 'no':
+            cp_md5 = {}
+            if os.path.exists('raw/cp_md5'):
+                md5_cp = open('raw/cp_md5').readlines()
+                for i in d1['sample']:
+                    for j in ['_R1', '_R2']:
+                        for k in md5_cp:
+                            if i in k and j in k:
+                                cp_md5[i+j] = k.split()[0]
+            else:
+                for i in d1.index:
+                    for j in ['_R1', '_R2']:
+                        v = os.popen('md5sum raw/'+d1.loc[i]['sample']+'*'+j+'*').readlines()[0].split()[0]
+                        cp_md5[d1.loc[i]['sample']+j] = v
+                ofile = open('raw/cp_md5', 'w')
+                for k in cp_md5:
+                    ofile.write(cp_md5[k]+' '+k+'\n')
+                ofile.close()
+            redo_judgement = raw_input('Has the raw data been copied to the backup space? If not, please enter no:')
+            if redo_judgement == 'no':
+                rawdata_dir = raw_input('Please enter the absolute path of the raw data:')
+                os.system('ls '+rawdata_dir)
+                #print os.listdir(rawdata_dir)
+                pattern = raw_input('please enter the pattern of R1 and R2:')
+                origin_md5 = {}
+                md5 = raw_input('please enter the absolute path of the md5 file:')
+                md5_origin = open(md5).readlines()
+                for i in d1.index:
+                    for j in pattern.split():
+                        if '1' in j:
+                            for k in md5_origin:
+                                if d1.loc[i][u'样本编号'] in k and j in k:
+                                    origin_md5[d1.loc[i][u'样本编号']+'_R1'] = k.split()[0]
+                        else:
+                            for k in md5_origin:
+                                if d1.loc[i][u'样本编号'] in k and j in k:
+                                    origin_md5[d1.loc[i][u'样本编号']+'_R2'] = k.split()[0]
+            else:
+                rawdata_dir = raw_input('Please enter the absolute path of the raw data:')
+                for i in d1[u'样本编号']:
+                    print os.listdir(rawdata_dir+i)
+                #all_file = list_file(rawdata_dir)
+                #for i in all_file:
+                #    if all_file.index(i)%2 == 1:
+                #        print i
+                #    else:
+                #        print i,
+                pattern = raw_input('please enter the pattern of R1 and R2:')
+                origin_md5 = {}
+                for i in d1.index:
+                    md5_origin = open(rawdata_dir+'/'+d1.loc[i][u'样本编号']+'/'+d1.loc[i][u'样本编号']+'.md5').readlines()
+                    for j in pattern.split():
+                        if '1' in j:
+                            for k in md5_origin:
+                                if d1.loc[i][u'样本编号'] in k and j in k:
+                                    origin_md5[d1.loc[i][u'样本编号']+'_R1'] = k.split()[0]
+                        else:
+                            for k in md5_origin:
+                                if d1.loc[i][u'样本编号'] in k and j in k:
+                                    origin_md5[d1.loc[i][u'样本编号']+'_R2'] = k.split()[0]
+            wrong = []
+            for i in d1.index:
+                for j in ['_R1', '_R2']:
+                    if origin_md5[d1.loc[i][u'样本编号']+j] != cp_md5[d1.loc[i]['sample']+j]:
+                        wrong.append(d1.loc[i][u'样本编号']+j+' '+d1.loc[i]['sample']+j)
+            if len(wrong) > 0:
+                for i in wrong:
+                    print i.split()[1]+' is not the same with '+i.split()[0]
+                sys.exit()
+            else:
+                print 'raw data is copied correctly'
+
+        ofile = open('check_slurm.sh', 'w')
+        ofile.write('for i in `find . -name \"slurm*\"`; do a=`grep -ci error $i`; if [ $a -gt 0 ]; then echo -e $i has errors; fi; done\n')
+        ofile.close()
+        os.system('bash check_slurm.sh')
+        #os.system('rm check.sh')
+        
+        qcsum_check = raw_input('Check qcsum?')
+        if qcsum_check != 'no':
+            if os.path.exists('all.qcsum'):
+                d2 = pd.read_table('all.qcsum', dtype=str)
+                d2.index = d2['sample']
+            	#os.system('cat all.qcsum')
+            else:
+                loss = []
+                for i in d1['sample']:
+                    if not os.path.exists(i+'/2_mapping/'+i+'.qcsum'):
+                        loss.append('qcsum of '+i+' does not exist')
+                if len(loss) > 0:
+                    for i in loss:
+                        print i
+                    sys.exit()
+                d2 = pd.DataFrame(columns=['sample', '1Xcov', '20Xcov', 'AvgDepth', 'duplication'])
+                for j in d1['sample']:
+                    fn = j+'/2_mapping/'+j+'.qcsum'
+                    qcsum = pd.read_table(fn)
+                    d2 = pd.concat([d2,qcsum], ignore_index=True)
+                d2.index = d2['sample']
+                d2.to_csv('all.qcsum', sep="\t", index=None)
+            with open('dbevn.sh') as f:
+                for l in f:
+                    if l.startswith('panel'):
+                        l = l.strip('\n').split(' ')
+                        strategy = l[2]
+            strategy = os.getcwd().split('/')[-1].split('_')[-1]
+            print 'strategy: '+strategy
+            truth = raw_input('Is the strategy right? If not, please enter it (WES PANEL IDT-PANEL Agilent-PANEL Agilent-wes ... ): ')
+            if truth != '':
+                strategy = truth
+            if strategy == 'PANEL' or strategy == 'Agilent-PANEL' or strategy == 'IDT-PANEL':
+                for i in d2.index:
+                    if float(d2.loc[i]['20Xcov']) < 95:
+                        print 'the 20X coverage of '+i+' is less than 95%'
+            else:
+                for i in d2.index:
+                    if float(d2.loc[i]['20Xcov']) < 90:
+                        print 'the 20X coverage of '+i+' is less than 90%'
+        
+        if os.path.exists('trio/peddy/pedtrio/results/peddy.sex_check.csv'):
+            #os.system('mv trio/peddy/pedtrio/results/peddy.sex_check.csv .')
+            sex = pd.read_csv('trio/peddy/pedtrio/results/peddy.sex_check.csv', dtype=str)
+            for i in sex.index:
+                if sex.loc[i]['error'] == 'True':
+                    print 'the sex of '+sex.loc[i]['sample_id']+' is not the same with the predicted result'
+        if os.path.exists('trio/peddy/pedtrio/results/peddy.ped_check.csv'):
+            #os.system('mv trio/peddy/pedtrio/results/peddy.ped_check.csv .')
+            ped = pd.read_csv('trio/peddy/pedtrio/results/peddy.ped_check.csv', dtype=str)
+            for i in ped.index:
+                if ped.loc[i]['parent_error'] == 'True':
+                    print ped.loc[i]['sample_a']+' and '+ped.loc[i]['sample_b']+' are not child-parent'
+        if os.path.exists('trio/peddy/pedtrio/results/peddy.html'):
+            os.system('mv trio/peddy/pedtrio/results/peddy.html .')
+        
+        rootDir = os.getcwd().split('/')[-1]
+        print rootDir
+        rootDir_truth = raw_input('Is the dir name correct? If not, please enter the name:')
+        if rootDir_truth != '':
+            rootDir = rootDir_truth
+        if os.path.exists(rootDir):
+            all_check_file = list_file(rootDir)
+            for i in all_check_file:
+                print unicode(i,'utf-8'),
+            wrong = []
+            for i in all_check_file:
+                target_file = find_file('.', i)
+                if len(target_file) > 2:
+                    print target_file
+                    print 'more than 2 files are found'
+                    sys.exit()
+                elif len(target_file) < 2:
+                    print target_file
+                    print 'only one file are found'
+                else:
+                    if not cmp(target_file[0],target_file[1]):
+                        wrong.extend(target_file)
+            if len(wrong) > 0:
+                for i in wrong:
+                    print wrong[i][0]+' is not the same with '+wrong[i][1]
+                sys.exit()
+                        #print target_file[0]+' is not the same with '+target_file[1]
+                        #sys.exit()
+

@@ -1,0 +1,24 @@
+gene_disease.txt
+本项目设计时制定的疾病ID、疾病、分类系统、相关基因、遗传模式
+
+combine_run1.snp.AF
+本项目过程中calling到的snp的频率（本地人群）
+
+ucsc_hg19_refGene.csv
+ucsc的refGene，用于计算某个variant位点距离某个转录本的exon区域的距离
+更新截止于2017.3月
+
+OMIM_selected_ch.csv
+OMIN相关中文注释表
+
+OMIM_selected_en.csv
+OMIM相关英文注释表
+
+phenotype_annotation_hpoteam_include_chpo_doid_xref.csv
+HPO相关注释表
+
+# update v2.5 补充OMIM_morbidmap注释表
+
+
+其他：
+历史遗留文件，已弃用

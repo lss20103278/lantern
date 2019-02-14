@@ -1,0 +1,191 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+"""
+version:2.6
+by:lss
+"""
+
+import numpy as np
+import pandas as pd
+import sys
+reload(sys)
+sys.setdefaultencoding("utf8")
+import os
+import re
+from prepare import *
+
+kwargs_raw = sys.argv[1:]
+kwargs={'-sn':'', '-l':'', '-mode':'merge', '-strategy':'WES', '-filtmode':'vqsr', '-gvcf':'no'}
+for i in range(len(kwargs_raw)):
+    for j in kwargs.keys():
+        if(kwargs_raw[i]==j):
+            kwargs.update({j:kwargs_raw[i+1]})
+
+#filelist = os.listdir('.')
+#list = []
+#for i in filelist:
+#    if 'xlsx.tmp' in i:
+#        list.append(i)  # the encoding of tmp file is problematic
+#        break
+#    elif '分析任务单' in i:
+#        list.append(i)
+#    elif '产品信息表' in i:
+#        list.append(i)
+##for i in filelist:
+##    if '分析任务单' in i and 'tmp' not in i:
+##        list.append(i)
+##    if '产品信息表' in i and 'tmp' not in i:
+##        list.append(i)
+
+#read sample list
+if(kwargs.get('-sn')!=''):
+    list=[]
+    list.append(kwargs.get('-sn'))
+    print "\nNote:sigle sample mode"
+else:
+    if kwargs.get('-l')!='':
+        list=pd.read_table(kwargs.get('-l'),header=None)[0].tolist()
+        print "\nNote:list samples mode"
+
+mode = kwargs.get('-mode')
+strategy = kwargs.get('-strategy')
+filtmode = kwargs.get('-filtmode')
+gvcf = kwargs.get('-gvcf')
+print '-mode:'+mode,'-strategy:'+strategy,'-filtmode:'+filtmode,'-gvcf:'+gvcf
+
+if len(list) != 0:
+    if not os.path.exists('dbevn.sh'):
+#        strategy = raw_input('strategy(WES PANEL Agilent IDT Agilent_wes brain blood_disease, if not exist, please enter none):')
+        generate_dbevn(strategy)
+    for sn in list:
+    	print sn
+        if 'tmp' in sn:
+            d1 = pd.read_table(sn, dtype=str, encoding='utf-8')
+            print d1[[u'样本编号',u'原始样本ID',u'姓名',u'性别']]
+            if 'sample' not in d1.columns:
+                ID = []
+                for i in range(len(d1[u'原始样本ID'].isnull())):
+                    if d1[u'原始样本ID'].isnull()[i]:
+                        ID.append(str(d1.iloc[i][u'样本编号']))
+                    else:
+                        ID.append(str(d1.iloc[i][u'原始样本ID']))
+                d1['sample'] = ID
+                d1['gender'] = d1[u'性别'].apply(lambda x:'1' if u'男' in x else '2')
+                d1 = append_relation(d1)
+                d1 = append_pedigree(d1)
+                d1 = append_phenotype(d1)
+                d1 = append_father_mother(d1)
+        else:
+            d1 = append_sample_gender_excel(sn)
+            print d1[[u'姓名', 'sample', 'gender']]
+            d1 = append_relation(d1)
+            d1 = append_pedigree(d1)
+            d1 = append_phenotype(d1)
+            d1 = append_father_mother(d1)
+            if u'）' in sn:
+                infile = sn.split(')')[0]+u'）'+sn.split(')')[1]
+            else:
+                infile = sn
+            d1.to_csv(infile+'.tmp', index=None, sep="\t", encoding='utf-8')
+        print d1[[u'样本编号', u'原始样本ID', u'姓名', u'性别','sample','father','mother','gender','relationship','pedigree','phenotype2']]
+        pedigree_dict = generate_pedigree(d1)
+        trio = generate_trio(pedigree_dict)
+#        filtmode = raw_input('please enter the filtmode(vqsr or hard):')
+        if not os.path.exists('trio/'):
+            os.makedirs('trio/gvcf') 
+            os.makedirs('trio/ped')
+        #os.system('cp /DATA/sslyu/trio_BWA-GATK_3.0/trio/gvcf.py trio')
+        if mode == 'merge':
+            os.system('cp /DATA/sslyu/trio_BWA-GATK_3.0/trio/sub_merge.sh trio')
+        else:
+            os.system('cp /DATA/sslyu/trio_BWA-GATK_3.0/trio/{sub.sh,sub_sep.sh} trio')
+        #os.system('cp -r /DATA/sslyu/trio_BWA-GATK_3.0/trio/ .')
+        for i in trio:
+            generate_ped(i,d1)
+            ID = d1.loc[i]['sample']
+            path = 'trio/'+ID
+            if not os.path.exists(path):
+                os.makedirs(path)
+            os.system('cp /DATA/sslyu/trio_BWA-GATK_3.0/trio/{mendel_to_annovar.sh,sort_sample.sh,vep-mendelscan.sh,vfilt.sh} '+path)
+            if mode == 'merge':
+                os.system('cp /DATA/sslyu/trio_BWA-GATK_3.0/trio/trio_merge.sh '+path)
+                trio_cmd = generate_trio_cmd_merge(path, filtmode)
+            else:
+                os.system('cp /DATA/sslyu/trio_BWA-GATK_3.0/trio/trio.sh '+path)
+                trio_cmd = generate_trio_cmd(path, filtmode)
+            trio_cmd.write('[ -e ../../$sample/2_mapping/$sample.depth.sample_gene_summary ] && cp ../../$sample/2_mapping/$sample.depth.sample_gene_summary ../../annotation\n')
+            trio_cmd.write('cp segtrio/$sample.{ann.hg19_multianno.txt,CADD,maf,link} ../../annotation\n')
+            if not os.path.exists('annotation'):
+                os.makedirs('annotation')
+            trio_cmd.write('cd ../../annotation\n')
+            trio_cmd.write('echo '+ID+' >> list\n')
+            trio_cmd.write('python /DATA/sslyu/trio_BWA-GATK_3.0/annotation/score_re.py -sn $sample\n')
+            relation = []
+            for j in pedigree_dict[i]:
+                relation.append(d1.loc[j]['relationship'])
+            a = ' '.join(relation)
+            if u'父' in a and u'母' in a:
+                trio_cmd.write('python /DATA/sslyu/trio_BWA-GATK_3.0/annotation/annotation_filt_ver2.8.py -sn $sample -c_f_m c_f_m\n')
+            else:
+                if u'父' in a:
+                    trio_cmd.write('python /DATA/sslyu/trio_BWA-GATK_3.0/annotation/annotation_filt_ver2.8.py -sn $sample -c_f_m c_f\n')
+                else:
+                    trio_cmd.write('python /DATA/sslyu/trio_BWA-GATK_3.0/annotation/annotation_filt_ver2.8.py -sn $sample -c_f_m c_m\n')
+            trio_cmd.write('fi\n')
+            trio_cmd.close()
+        #generate_peddy(trio, d1)
+        generate_trio_list(trio, d1)
+
+#        judgement = raw_input('Do you need to copy gvcf? If not, please enter no:')
+#        if judgement != 'no':
+        if gvcf != 'no':
+            trio_m_ID = []
+            for k in pedigree_dict:
+                for i in pedigree_dict[k]:
+                    trio_m_ID.append(d1.loc[i]['sample'])
+            ofile = open('cp_gvcf.sh', 'w')
+            for i in trio_m_ID:
+             	ofile.write('cp '+i+'/3_variants/gvcf/* trio/gvcf\n')
+            ofile.close()
+            with open('cp_gvcf.sh') as f:
+             	for l in f:
+                    print l.strip('\n')
+            judgement1 = raw_input('Is the shell script correct? If not, please enter no:')
+            if judgement1 == 'no':
+             	cmd = raw_input('Please enter the copy command to copy gvcf:')
+             	os.system(cmd)
+            else:
+                os.system('bash cp_gvcf.sh')
+    if not os.path.exists('trio/peddy'):
+        os.makedirs('trio/peddy')
+    if mode == 'merge':
+        path = 'trio/peddy/'
+        trio_cmd = generate_trio_cmd_merge(path, filtmode)
+        trio_cmd.write('fi\n')
+        trio_cmd.close()
+        os.system('cp /DATA/sslyu/trio_BWA-GATK_3.0/trio/trio_peddy_merge.sh trio/peddy')
+    else:
+        os.system('cp /DATA/sslyu/trio_BWA-GATK_3.0/trio/{cmd.sh,trio_peddy.sh} trio/peddy')
+else:
+    print 'please offer an information excel, the name of the excel should include \"分析任务单\", the columns should be 样本编号 原始样本ID 姓名 性别 pedigree relationship'
+    sys.exit()
+
+#os.system('sort trio/ped/peddy.ped |uniq > tmp; mv tmp trio/ped/peddy.ped')
+if os.path.exists('peddy_tmp'):
+    os.system('rm peddy_tmp')
+os.system('for i in `ls trio/ped/*mendel.ped`; do cat $i >> peddy_tmp; done')
+os.system('awk \'{OFS="\t"; print \'0\',$2,$3,$4,$5,$6}\' peddy_tmp > trio/ped/peddy.ped')
+os.system('sort trio/list |uniq > tmp; mv tmp trio/list')
+with open('trio/ped/peddy.ped') as f:
+	for l in f:
+		print l.strip('\n')
+#with open('cmd.sh') as f:
+#	for l in f:
+#		print l.strip('\n')
+#truth = raw_input('Is the peddy.ped correct? If not, please enter no: ')
+#if truth != '':
+#	os.chdir('..')
+#	sys.exit()
+#else:
+#	os.system('sh sub.sh')
+#	os.chdir('..')

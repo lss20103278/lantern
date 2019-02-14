@@ -1,0 +1,14 @@
+familyname	sample1	sample2	sample3	gender	phen
+familyname	sample2 0	0	gender	phen
+familyname	sample3	0	0	gender	phen
+familyname	sample4	sample2	sample3	gender	phen
+
+
+#notes:
+sample2,sample3为sample1的直系亲属(父母)
+sample2,sample3的亲本没有数据，所以填0
+sample4 为sample1的兄弟姐妹，共同的父母为sample2,sample3
+gender依据样本的性别填写：男->1 , 女->2
+phen依据表型和软件需求填写，本项目中，familyname.ped里所有phen写0；familyname.mendel.ped中，发病者写2，其他写1
+
+

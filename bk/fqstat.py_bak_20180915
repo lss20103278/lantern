@@ -1,0 +1,104 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+import sys
+reload(sys)
+sys.setdefaultencoding("utf8")
+import os
+import pandas as pd
+from prepare import *
+
+def list_file(rootDir):
+    all_file = []
+    for lists in os.listdir(rootDir):
+        path = os.path.join(rootDir, lists)
+        if os.path.isdir(path):
+            list_file(path)
+        else:
+            all_file.append(lists)
+    return all_file
+
+kwargs_raw = sys.argv[1:]
+kwargs={'-sn':'', '-l':''}
+for i in range(len(kwargs_raw)):
+    for j in kwargs.keys():
+        if(kwargs_raw[i]==j):
+            kwargs.update({j:kwargs_raw[i+1]})
+
+ReadNum = []
+BaseNum = []
+Q30 = []
+sn = pd.read_table('list', header=None)
+if(kwargs.get('-sn')!=''):
+    infile = kwargs.get('-sn')
+d1 = append_sample_gender_excel(infile)
+d1.index = d1['sample']
+if len(os.popen('ls raw/*info').readlines()) != sn.shape[0]:
+    ofile = open('fqstat.sh', 'w')
+    loss = []
+    for i in d1[u'样本编号']:
+        for j in [u'Reads(M)', 'bases(Mb)', 'Q30']:
+            if d1.loc[i][j] == 'nan':
+                loss.append(i)
+                break
+    if len(os.popen('ls raw/*gz').readlines())/2 != sn.shape[0]:
+        rawdata_dir = raw_input('please enter the absolute path of raw data:')
+        d1.index = d1[u'样本编号']
+        for i in d1[u'样本编号']:
+            print os.listdir(rawdata_dir+'/'+i)
+        pattern = raw_input('please enter the pattern of R1 and R2:')
+        for i in loss:
+            ofile.write('/home/ana005/anaconda2/bin/iTools Fqtools stat -InFq '+rawdata_dir+'/'+i+'/*'+pattern.split()[0]+'* -InFq '+rawdata_dir+'/'+i+'/*'+pattern.split()[1]+'* -OutStat raw/'+d1.loc[i]['sample']+'.info\n')
+        ofile.close()
+    else:    
+        for i in loss:
+        	ofile.write('/home/ana005/anaconda2/bin/iTools Fqtools stat -InFq raw/'+i+'*R1*gz -InFq raw/'+i+'*R2*gz -OutStat raw/'+i+'.info\n')
+        ofile.close()
+    with open('fqstat.sh') as f:
+        for l in f:
+            print l
+    judgement = raw_input('Is the shell script correct? If not, please enter no: ')
+    if judgement == '':
+        os.system('bash fqstat.sh')
+        #os.system('rm fqstat.sh')
+        for i in loss:
+        	with open('raw/'+i+'.info') as f:
+        		Q30_base = 0.0
+        		for l in f:
+        			if 'ReadNum' in l:   
+        				readnum = float(l.split(': ')[1].split('\t')[0])/1000000.0
+        				if 'BaseNum' in l:
+        					basenum = float(l.split(': ')[2].split('\t')[0])*2/1000000.0
+        			if 'BaseQ' in l and 'Q30' in l:
+        				Q30_base = Q30_base + float(l.strip('\n').split('Q30: ')[1][:-1])
+                ReadNum.append('{:.2f}'.format(readnum))
+                BaseNum.append('{:.2f}'.format(basenum))	
+                Q30.append('{:.2f}'.format(Q30_base/2)+'%')
+    else:
+        sys.exit()
+else:
+    loss = sn[0]
+    for i in sn[0]:
+        with open('raw/'+i+'.info') as f:
+            Q30_base = 0.0
+            for l in f:
+                if 'ReadNum' in l:
+                    readnum = float(l.split(': ')[1].split('\t')[0])/1000000.0
+                    if 'BaseNum' in l:
+                        basenum = float(l.split(': ')[2].split('\t')[0])*2/1000000.0
+                if 'BaseQ' in l and 'Q30' in l:
+                    Q30_base = Q30_base + float(l.strip('\n').split('Q30: ')[1][:-1])
+            ReadNum.append('{:.2f}'.format(readnum))
+            BaseNum.append('{:.2f}'.format(basenum))
+            Q30.append('{:.2f}'.format(Q30_base/2)+'%')
+df = pd.DataFrame(columns=['Reads(M)', 'bases(Mb)', 'Q30'])
+df['Reads(M)'] = ReadNum
+df['bases(Mb)'] = BaseNum
+df['Q30'] = Q30
+loss_ID = [d1.loc[i]['sample'] for i in loss] #
+ex_list = [d1.loc[i]['sample'] for i in d1.index.tolist() if i not in loss]
+d1_tmp = d1.loc[ex_list]
+df.index = loss_ID    #
+d_all = pd.concat([d1_tmp,df], axis=1)
+d_all.to_csv('all_fqstat', sep="\t")             #
+

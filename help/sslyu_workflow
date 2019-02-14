@@ -1,0 +1,19 @@
+1. bash /DATA/sslyu/trio_BWA-GATK_3.0/prepare.bash serial(e.g.84_20181009) strategy(e.g.IDT-PANEL)
+2. cp 分析任务单/儿童遗传病（交大附属儿医）分析任务单（PANEL\)_20181017.xlsx 84_20181009/84_20181009_IDT-PANEL/儿童遗传病（交大附属儿医）分析任务单（PANEL）_20181017.xlsx # Note: change ) to ）
+3. cd 84_20181009/84_20181009_IDT-PANEL/
+   modify cp_rawdata.sh according to the rawdata
+   sh /DATA/sslyu/trio_BWA-GATK_3.0/sub_cp_list.sh rename0 /DATA/rawdata/sslv/201810... md5sum.txt _1.fq.gz _2.fq.gz
+   python /DATA/sslyu/trio_BWA-GATK_3.0/src/check.py -sn 儿童遗传病（交大附属儿医）分析任务单（PANEL）_20181017.xlsx
+   python /DATA/sslyu/trio_BWA-GATK_3.0/src/step1_prepare.py -sn 儿童遗传病（交大附属儿医）分析任务单（PANEL）_20181017.xlsx 
+   (If reads, bases(Mb) or Q30 is not provided, cp /DATA/sslyu/trio_BWA-GATK_3.0/fqstat.sh .; sh /DATA/sslyu/trio_BWA-GATK_3.0/sub_fqstat.sh ...)
+   sh /DATA/sslyu/trio_BWA-GATK_3.0/sub_list.sh list
+4. If the samples are families:
+   After the last step is done, 
+   sh /DATA/sslyu/trio_BWA-GATK_3.0/sub_trio_list.sh trio/list
+5. Sex,qcsum check:
+   sh /DATA/sslyu/trio_BWA-GATK_3.0/sub_peddy.sh
+   python /DATA/sslyu/trio_BWA-GATK_3.0/src/check.py -sn 儿童遗传病（交大附属儿医）分析任务单（PANEL）_20181017.xlsx
+6. Generate report:
+   python /DATA/sslyu/trio_BWA-GATK_3.0/src/step4_generate_excel.py -sn 儿童遗传病（交大附属儿医）分析任务单（PANEL）_20181017.xlsx
+7. Backup:
+   python /DATA/sslyu/trio_BWA-GATK_3.0/src/step5_backup.py -sn 儿童遗传病（交大附属儿医）分析任务单（PANEL）_20181017.xlsx   

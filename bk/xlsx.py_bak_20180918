@@ -1,0 +1,128 @@
+import pandas as pd
+import sys
+import os
+import copy
+reload(sys)
+sys.setdefaultencoding('utf8')
+
+def GT_Flag(lst):
+    result= ['0','0','0']
+    if lst[0] ==lst[1]:
+        result[0]='1'
+    if lst[0] == lst[2]:
+        result[1]='1'
+    if lst[1] == lst[2]:
+        result[2] ='1'
+    return ':'.join(result)
+
+
+def xlsxgen(sn,ver):
+    print "creating xlsx for sample : %s" %(sn)
+    wb=pd.ExcelWriter(sn.strip()+"_"+ver+".xlsx",engine='openpyxl')
+    readme = pd.read_excel('/DATA/sslyu/trio_BWA-GATK_2.7/annotation/db/readme.xlsx',sheetname = 'readme',header = 0)
+    #filt1=pd.read_table(sn.strip()+".sheet1.txt",sep="\t",dtype=str,encoding='utf-8')
+	##filt1=pd.read_table(sn.strip()+".sheet1.txt",sep="\t",dtype=str)
+    command1 = '/DATA/ypliu/opt/R-3.4.3/bin/Rscript /DATA/sslyu/trio_BWA-GATK_3.0/Data_transform_v3.R '+sn.strip()+'.sheet1.txt > '+sn.strip()+'.sheet1.tsv'
+    print command1
+    os.system('/DATA/ypliu/opt/R-3.4.3/bin/Rscript /DATA/sslyu/trio_BWA-GATK_3.0/Data_transform_v3.R '+sn.strip()+'.sheet1.txt > '+sn.strip()+'.sheet1.tsv')
+    filt1=pd.read_table(sn.strip()+".sheet1.tsv",sep="\t",dtype=str,encoding='utf-8')
+	
+    #filt2=pd.read_table(sn.strip()+".sheet2.txt",sep="\t",dtype=str,encoding='utf-8')
+    os.system('/DATA/ypliu/opt/R-3.4.3/bin/Rscript /DATA/sslyu/trio_BWA-GATK_3.0/Data_transform_v3.R '+sn.strip()+'.sheet2.txt > '+sn+'.sheet2.tsv')
+    filt2=pd.read_table(sn.strip()+".sheet2.tsv",sep="\t",dtype=str,encoding='utf-8')
+	
+    #filt3=pd.read_table(sn.strip()+".sheet3.txt",sep="\t",dtype=str,encoding='utf-8')
+    os.system('/DATA/ypliu/opt/R-3.4.3/bin/Rscript /DATA/sslyu/trio_BWA-GATK_3.0/Data_transform_v3.R '+sn.strip()+'.sheet3.txt > '+sn+'.sheet3.tsv')
+    filt3=pd.read_table(sn.strip()+".sheet3.tsv",sep="\t",dtype=str,encoding='utf-8')
+    filt3.insert(filt3.columns.tolist().index('AAChange.refGene')+1,'SIFT/Polyphen2_HVAR/MutationTaster/FATHMM/M-CAP/REVEL',filt3['SIFT_pred']+"/"+filt3['Polyphen2_HVAR_pred']+"/"+filt3['MutationTaster_pred']+"/"+filt3['FATHMM_pred']+"/"+filt3['M-CAP_pred']+"/"+filt3['REVEL'].replace('NA',0).apply(lambda x:'D' if float(x)>0.5 else '.')) # the source of .
+	
+	#filt3['SIFT/Polyphen2_HVAR/MutationTaster/FATHMM/M-CAP/REVEL']=filt3['SIFT_pred']+"/"+filt3['Polyphen2_HVAR_pred']+"/"+filt3['MutationTaster_pred']+"/"+filt3['FATHMM_pred']+"/"+filt3['M-CAP_pred']+"/"+filt3['REVEL'].replace('NA',0).apply(lambda x:'D' if float(x)>0.5 else '.')
+
+    filt1.to_excel(wb,"filt1",na_rep="-",index=False)
+    filt2.to_excel(wb,"filt2",na_rep="-",index=False)
+	#filt3.to_excel(wb,"filt3",na_rep="-",index=False)
+
+    filt3.score_total=filt3.score_total.apply(pd.to_numeric,errors='coerce')
+    filt3=filt3.sort_values(['score_total'],ascending=0)
+	
+    filt4 = filt3[(filt3['Func.refGene'].apply(lambda x : 'splicing' in x))|(filt3['Heterozygosity']=='hom')| \
+        (filt3['ExonicFunc.refGene'].fillna('nothing').apply(lambda x: 'stoploss' in x or 'stopgain' in x)) | \
+        (filt3['ExonicFunc.refGene']=='frameshift deletion')| \
+        (filt3['ExonicFunc.refGene']=='frameshift insertion')| \
+        (filt3['SIFT_pred']=='D') | (filt3['Polyphen2_HVAR_pred'].apply(lambda x: x=="D" or x=="P")) | \
+        (filt3['min_edge'].notnull())]
+    filt4 = filt4[filt4['Func.refGene'] != 'ncRNA_intronic']
+
+    filt3.to_excel(wb,"selected_mutations",na_rep="-",index=False)
+    #filt3.to_csv(sn+"_selected_mutations.tsv",na_rep="-",index=False,sep="\t")
+    filt4.to_excel(wb,"splicing,stop gain loss,DD,DP",na_rep="-",index=False)
+
+
+    if 'Trio_GTinfo' in filt3.columns:
+        filt_tmp = filt3[filt3['Heterozygosity'] != 'unexact']
+        filt_hom = filt_tmp[filt_tmp['Heterozygosity'] == 'hom']
+        filt_hom.index = range(len(filt_hom))
+        GTinfo = filt_hom['Trio_GTinfo'].str.split(':')
+        GT_flag = []
+        for i in GTinfo.values:
+			GT_flag.append(GT_Flag(i))  # GT_flag is a three values seperated by :, the first is whether the genotype of child is the same as that of father, the second is whether the genotype of child is the same as that of mother, the third is whether the genotype of father is the same as that of mother, 0 stands for different, 1 stands for the same
+		# print GT_flag
+        filt_hom['tmp'] = pd.Series(GT_flag, index=filt_hom.index)
+        filt_hom = filt_hom[(filt_hom['tmp'] == '0:0:1') | (filt_hom['tmp'] == '0:0:0') | (filt_hom['DENOVO'] != '-')]
+        filt_hom = filt_hom[filt_hom['SIFT/Polyphen2_HVAR/MutationTaster/FATHMM/M-CAP/REVEL'].fillna('-').str.startswith(('D/D', 'D/P', 'D/B', 'T/D', './D', 'D/.'))]
+		#################### het
+
+        filt_het = filt_tmp[filt_tmp['Heterozygosity'] == 'het']
+        gene_count_dict = dict(filt_het['Gene.refGene'].value_counts())
+        gene_count_lst = [k for k, v in gene_count_dict.items() if v > 3]
+        for each_gene in gene_count_lst:
+            filt_het = filt_het[filt_het['Gene.refGene'] != each_gene]
+        gene_count_lst_2_3 = [k for k, v in gene_count_dict.items() if 1 < v <= 3]
+        filt_het_1 = filt_het.copy()
+        for each_gene in gene_count_lst_2_3:
+            filt_het_1 = filt_het_1[filt_het_1['Gene.refGene'] != each_gene]
+        filt_het_1 = filt_het_1[
+            (filt_het_1['InheritanceStatus'].str.contains('AD')) | (filt_het_1['InheritanceStatus'].str.contains('CX'))]
+        filt_het_1.index = range(len(filt_het_1))
+        GTinfo = filt_het_1['Trio_GTinfo'].str.split(':')
+        GT_flag = []
+        for i in GTinfo.values:
+            GT_flag.append(GT_Flag(i))
+        filt_het_1['tmp'] = pd.Series(GT_flag, index=filt_het_1.index)
+        filt_het_1 = filt_het_1[filt_het_1['SIFT/Polyphen2_HVAR/MutationTaster/FATHMM/M-CAP/REVEL'].fillna('-').str.startswith(('D/D', 'D/P', 'D/B', 'T/D', './D', 'D/.'))]
+
+        gene_count_lst_1 = [k for k, v in gene_count_dict.items() if v == 1]
+        filt_het_2 = filt_het.copy()
+        for each_gene in gene_count_lst_1:
+            filt_het_2 = filt_het_2[filt_het_2['Gene.refGene'] != each_gene]
+        filt_het_2.index = range(len(filt_het_2))
+        GTinfo = filt_het_2['Trio_GTinfo'].str.split(':')
+        GT_flag = []
+        gene_tmp = []
+        for i in GTinfo.values:
+            GT_flag.append(GT_Flag(i))
+        filt_het_2['tmp'] = pd.Series(GT_flag, index=filt_het_2.index)
+        for each_gene in gene_count_lst_2_3:
+            filt_het_2_tmp = filt_het_2[filt_het_2['Gene.refGene'] == each_gene]
+            gene_tmp_flag = filt_het_2_tmp['tmp'].tolist()
+            if '0:1:0' in gene_tmp_flag and '1:0:0' in gene_tmp_flag:
+                if filt_het_2_tmp['SIFT/Polyphen2_HVAR/MutationTaster/FATHMM/M-CAP/REVEL'].fillna('-').str.startswith(('D/D', 'D/P', 'D/B', 'T/D', './D', 'D/.')).tolist().count(True):
+                    gene_tmp.append(each_gene)
+        gene_2_3 = set(gene_count_lst_2_3) - set(gene_tmp)
+        for each_gene in gene_2_3:
+            filt_het_2 = filt_het_2[filt_het_2['Gene.refGene'] != each_gene]
+
+        filt_het = pd.concat([filt_het_1, filt_het_2])
+        filt5 = pd.concat([filt_hom, filt_het])
+
+        del filt5['tmp']
+        filt5 = filt5.sort_values(['score_total'], ascending=0)
+        filt5.to_excel(wb,'filt_selected_mutations',na_rep = "-",index = False)
+    readme.to_excel(wb,'readme',index = False)
+    ws = wb.sheets['selected_mutations']
+    for i in range(2,len(filt3)+1):
+        i = str(i)
+        ws['AA'+i].hyperlink = "http://gnomad.broadinstitute.org/variant/"+ws['AA'+i].value    
+    wb.save()
+
+

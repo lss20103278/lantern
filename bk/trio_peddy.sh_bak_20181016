@@ -1,0 +1,132 @@
+#!/bin/sh
+
+:<<Note_script_version
+ver:1.1
+for:
+update:2017/3/29
+by:gp
+Note_script_version
+
+:<<HELP
+triomode="gvcf | combine"
+filtmode="vqsr | hardfilt"
+
+pre-work:
+./ped: prepare *.ped for each family
+./gvcf: prepare *.g.vcf for each sample
+HELP
+
+
+sn=$1
+proc=$2
+
+:<<note
+filtmode=$3
+
+if [ "$filtmode" != "hard" -a "$filtmode" != "vqsr" ];then
+    echo "ERROR: filter method not specified or wrong type('hard' / 'vqsr' only). Exiting ..."
+    exit
+fi
+note
+
+##env:
+#source `pwd`/../../dbevn.sh
+source `pwd`/../dbevn.sh
+
+
+
+
+#cp ../ped/peddy.ped ./
+sort ../ped/peddy.ped |uniq > $sn.ped # The input list peddy.gvcf.list contains file ../gvcf/18N0742.g.vcf multiple times, which isn't allowed. If you are intentionally trying to include the same file more than once, you will need to specify it in separate file lists.
+samples=`awk '{print $2}' $sn.ped`
+
+echo "" > $sn.gvcf.list
+for i in $samples
+do
+echo "../gvcf/$i.g.vcf" >> $sn.gvcf.list
+done 
+sed -i '/^$/d' $sn.gvcf.list
+
+gvcf_argument="" # sentieon
+while read -r line
+do
+gvcf_argument=$gvcf_argument" -v $line"
+done < $sn.gvcf.list
+
+outdir="pedtrio"
+[ ! -d $outdir ] && mkdir $outdir
+#combine gvcfs:
+#java -jar $soft_path/GATK/3.7/GenomeAnalysisTK.jar -T GenotypeGVCFs -R $ref_genome -L $panel --dbsnp $ref_snp \
+# -stand_call_conf 10 \
+# -o $outdir/$sn.vcf \
+# --variant $sn.gvcf.list
+## -o $outdir/$sn.raw.vcf
+sentieon driver -t $proc -r $ref_genome --interval $panel --algo GVCFtyper --call_conf=10 -d $ref_snp $gvcf_argument $outdir/$sn.vcf
+
+:<< note
+#vqsr:
+sh vfilt.sh $outdir $sn $filtmode
+
+
+#CalculateGenotypePosteriors:
+java -jar $soft_path/GATK/3.7/GenomeAnalysisTK.jar -T CalculateGenotypePosteriors \
+ -R $ref_genome \
+ -V $outdir/$sn.raw.snp.pass.vcf \
+ -ped ../ped/$sn.ped \
+ -o $outdir/$sn.snp.gt.vcf 
+
+java -jar $soft_path/GATK/3.7/GenomeAnalysisTK.jar -T CalculateGenotypePosteriors \
+ -R $ref_genome \
+ -V $outdir/$sn.raw.indel.pass.vcf \
+ -ped ../ped/$sn.ped \
+ -o $outdir/$sn.indel.gt.vcf
+
+#lowGQ:
+java -jar $soft_path/GATK/3.7/GenomeAnalysisTK.jar -T VariantFiltration \
+ -R $ref_genome \
+ --genotypeFilterExpression "DP<20 && GQ<20" \
+ --genotypeFilterName "lowGQ" \
+ -V $outdir/$sn.snp.gt.vcf \
+ -o $outdir/$sn.snp.gt.flt.vcf
+
+java -jar $soft_path/GATK/3.7/GenomeAnalysisTK.jar -T VariantFiltration \
+ -R $ref_genome \
+ --genotypeFilterExpression "DP<20 && GQ<20" \
+ --genotypeFilterName "lowGQ" \
+ -V $outdir/$sn.indel.gt.vcf \
+ -o $outdir/$sn.indel.gt.flt.vcf
+
+#denovo_anotation:
+java -jar $soft_path/GATK/3.7/GenomeAnalysisTK.jar -T VariantAnnotator -L $panel \
+ -R $ref_genome \
+ -A PossibleDeNovo \
+ -ped ../ped/$sn.ped \
+ -V $outdir/$sn.snp.gt.flt.vcf \
+ -o $outdir/$sn.snp.gt.novo.vcf
+
+java -jar $soft_path/GATK/3.7/GenomeAnalysisTK.jar -T VariantAnnotator -L $panel \
+ -R $ref_genome \
+ -A PossibleDeNovo \
+ -ped ../ped/$sn.ped \
+ -V $outdir/$sn.indel.gt.flt.vcf \
+ -o $outdir/$sn.indel.gt.novo.vcf
+
+#combine
+java -cp $soft_path/GATK/3.7/GenomeAnalysisTK.jar org.broadinstitute.gatk.tools.CatVariants -R $ref_genome -V $outdir/$sn.snp.gt.novo.vcf -V $outdir/$sn.indel.gt.novo.vcf -out $sn.gt.vcf -assumeSorted
+
+bcftools norm -m - $sn.gt.vcf > $outdir/$sn.vcf
+note
+
+# peddy
+cd $outdir
+
+#vcf-sort $sn.vcf>$sn.sort.vcf
+vcf-sort $sn.vcf>$sn.raw.sort.vcf
+sed 's/^chr//g' $sn.raw.sort.vcf>$sn.sort.vcf
+bgzip -c $sn.sort.vcf>$sn.sort.vcf.gz
+tabix -p vcf $sn.sort.vcf.gz
+[ ! -e results ] && mkdir -p results
+cd results
+python -m peddy -p 4 --plot --prefix $sn ../$sn.sort.vcf.gz ../../$sn.ped
+
+

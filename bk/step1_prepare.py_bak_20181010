@@ -1,0 +1,286 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+#########################################################################
+# File Name: generate_ped.py
+# Author: sslyu
+# mail: 1573077420@qq.com
+# Created Time:Fri 28 Sep 2018 05:15:56 PM CST
+#########################################################################
+
+import numpy as np
+import pandas as pd
+import sys
+reload(sys)
+sys.setdefaultencoding("utf8")
+import os
+import re
+#from prepare import *
+
+import shutil
+#shutil.copyfile('/DATA/sslyu/trio_BWA-GATK_2.7/sub.sh', 'sub.sh')
+
+
+kwargs_raw = sys.argv[1:]
+if len(kwargs_raw) != 6:
+    print """
+    examples:
+    python /DATA/sslyu/trio_BWA-GATK_3.1/step1_prepare.py -sn excelname -serial 81_20180917 -strategy WES
+    """
+    sys.exit()
+
+kwargs={'-sn':'', '-serial':'', '-strategy':''}
+for i in range(len(kwargs_raw)):
+	for j in kwargs.keys():
+		if(kwargs_raw[i]==j):
+			kwargs.update({j:kwargs_raw[i+1]})
+
+#read parameter list
+sn = kwargs.get('-sn')
+serial = kwargs.get('-serial')
+strategy = kwargs.get('-strategy')
+print "\nSample: %s\nSerial: %s\nStrategy: %s" % (sn, serial, strategy)
+
+prepare_bash = open('prepare.bash', 'w')
+prepare_bash.write('#########################################################################\n')
+prepare_bash.write('# File Name: prepare.sh\n')
+prepare_bash.write('# Author: sslyu\n')
+prepare_bash.write('# mail: 1573077420@qq.com\n')
+prepare_bash.write('# Created Time:Wed 19 Sep 2018 11:00:45 PM CST\n')
+prepare_bash.write('#########################################################################\n')
+prepare_bash.write('#!/bin/bash\n\n')
+prepare_bash.write('serial=$1\n')
+prepare_bash.write('strategy=$2\n')
+prepare_bash.write('mkdir -p $serial/$serial\_$strategy\n')
+prepare_bash.write('cd $serial/$serial\_$strategy\n')
+prepare_bash.write('mkdir -p raw peddy annotation $serial\_$strategy CNV \n')
+prepare_bash.write('cp -r /DATA/sslyu/trio_BWA-GATK_3.1/src/ .\n')
+prepare_bash.close()
+sys.exit()
+
+os.system('cp /DATA/sslyu/trio_BWA-GATK_3.0/sub_{sep,list,cp_list,cp_single,list_single_step1,list_single_step2,list_trio}.sh .')
+    #os.system('ln -s /DATA/sslyu/trio_BWA-GATK_2.7/step*py .')
+for sn in list:
+    if os.path.exists('dbevn.sh'):
+        with open('dbevn.sh') as f:
+            for l in f:
+                print l.strip('\n')
+        truth = raw_input('Is dbevn.sh correct?')
+        if truth == 'no':
+            strategy = raw_input('strategy(WES PANEL Agilent-PANEL IDT-PANEL Agilent-wes brain blood-disease, if not exist, please enter none):')
+            generate_dbevn(strategy)
+    else:
+        strategy = raw_input('strategy(WES PANEL Agilent-PANEL IDT-PANEL Agilent-wes brain blood-disease, if not exist, please enter none):')
+        generate_dbevn(strategy)
+        with open('dbevn.sh') as f:
+            for l in f:
+                print l.strip('\n')
+    if 'tmp' in sn:
+        d1 = pd.read_table(sn, dtype=str, encoding='utf-8')
+        d1.index = d1[u'姓名']
+    else:
+        d1 = append_sample_gender_excel(sn)
+        print d1[[u'姓名', u'性别', 'sample']]
+        d1 = append_relation(d1)
+        d1 = append_pedigree(d1)
+        d1 = append_phenotype(d1)
+        d1 = append_father_mother(d1)
+        print d1
+
+    ####### step1: copy raw date    
+    ofile = open('step1_prepare.sh', 'w')
+    cp_judgement = raw_input('Do you need to copy the raw data? If not, please enter no:')
+    if cp_judgement != 'no':
+        if not os.path.exists('raw'):
+            os.system('mkdir raw')
+        ID = d1['sample']
+        ofile.write('mkdir raw\n')
+        
+        redo_judement = raw_input('Is this a redo work? If not, please enter no:  ')
+        if redo_judement == 'no':
+            single_judgement = raw_input('Is the raw data in a single dir or in a set of subdirs? If single, please enter single, if set, please enter set:')
+            if single_judgement == 'single':
+                rawdata_dir = raw_input('Please enter the absolute path of the raw data:  ')
+                if not rawdata_dir.startswith('/DATA'):
+                    rawdata_dir = os.getcwd()+'/'+rawdata_dir
+                os.system('ls '+rawdata_dir)
+                origin = raw_input('please enter the pattern of R1 and R2:  ')
+                ofile.write('a=('+' '.join(d1[u'样本编号'])+')\n')
+                ofile.write('c=('+' '.join(origin.split(' '))+')\n')
+                n = str(len(d1[u'样本编号']))
+                md5 = raw_input('please enter the absolute path of the md5 file:  ')
+                if not md5.startswith('/DATA'):
+                    md5 = os.getcwd()+'/'+md5
+                ofile.write('cp '+md5+' raw/origin_md5\n')
+                d1.index = d1['sample']
+                for i in d1['sample']:
+                    if not os.path.exists(str(i)):
+                        os.mkdir(str(i))
+                    cp_rawdata_file = open(str(i)+'/cp_rawdata.sh','w')
+                    cp_rawdata_file.write('#!/bin/sh\n\n#SBATCH -J '+i+'\n#SBATCH -p BP10\n#SBATCH -N 1\n#SBATCH -n 4\n\nsample='+i+'\n\nmkdir -p ../raw/bk/'+d1.loc[i][u'样本编号']+'\nawk \'{if(match($2,\"\'$list\'\")){print $0}}\' '+md5+' > ../raw/bk/'+d1.loc[i][u'样本编号']+'/'+d1.loc[i][u'样本编号']+'.md5\ncp '+rawdata_dir+'/*'+d1.loc[i][u'样本编号']+'*'+origin.split(' ')[0]+'* ../raw/bk/'+d1.loc[i][u'样本编号']+'\ncp '+rawdata_dir+'/*'+d1.loc[i][u'样本编号']+'*'+origin.split(' ')[1]+'* ../raw/bk/'+d1.loc[i][u'样本编号']+'\ncp '+rawdata_dir+'/*'+d1[u'样本编号'][i]+'*'+origin.split(' ')[0]+'* ../raw/'+i+'_R1.fastq.gz\ncp '+rawdata_dir+'/*'+d1[u'样本编号'][i]+'*'+origin.split(' ')[1]+'* ../raw/'+i+'_R2.fastq.gz\n')
+                    cp_rawdata_file.close()
+    
+                ofile.write('for i in `seq '+n+'`; do mkdir -p raw/bk/${a[$i-1]}; awk \'{if(match($2,\"\'${a[$i-1]}\'\")){print $0}}\' '+md5+' > raw/bk/${a[$i-1]}/${a[$i-1]}.md5; for j in `seq 2`; do cp '+rawdata_dir+'/*${a[$i-1]}*${c[$j-1]}* raw/bk/${a[$i-1]}; done; done\n')
+                for i in range(len(d1[u'样本编号'])):
+                	for j in range(2):
+                		ofile.write('cp '+rawdata_dir+'/*'+d1[u'样本编号'][i]+'*'+origin.split(' ')[j]+'* raw/'+ID[i]+'_R'+str(j+1)+'.fastq.gz;')
+                	ofile.write('\n')
+            else:
+                parent_raw_dir = raw_input('please enter the parent directory:  ')
+                for i in d1[u'样本编号']:
+                    ##rawdata_dir = '/anaData/anaData004/children_hos_genetic/rawdata/2018/'+strategy+'/'
+                    #raw_dir = parent_raw_dir+strategy+'/'
+                    rawdata_dir = parent_raw_dir+'/*'+i+'*'
+                    os.system('ls '+rawdata_dir)
+                origin = raw_input('please enter the pattern of R1 and R2:  ')
+                md5 = raw_input('please enter the pattern of md5:  ')
+                d1.index = d1['sample']
+                for i in d1['sample']:
+                    if not os.path.exists(str(i)):
+                        os.mkdir(str(i))
+                    cp_rawdata_file = open(str(i)+'/cp_rawdata.sh','w')
+                    #cp_rawdata_file.write('#!/bin/sh\n\n#SBATCH -J '+i+'\n#SBATCH -p BP10\n#SBATCH -N 1\n#SBATCH -n 4\n\nsample='+i+'\n\nmkdir -p ../raw/bk/'+d1.loc[i][u'样本编号']+'\ncp -r '+parent_raw_dir+'/*'+d1.loc[i][u'样本编号']+'*/* ../raw/bk/'+d1.loc[i][u'样本编号']+'\ncp '+parent_raw_dir+'/*'+d1.loc[i][u'样本编号']+'*/*'+d1.loc[i][u'样本编号']+'*'+origin.split(' ')[0]+'* ../raw/'+i+'_R1.fastq.gz\ncp '+parent_raw_dir+'/*'+d1.loc[i][u'样本编号']+'*/*'+d1.loc[i][u'样本编号']+'*'+origin.split(' ')[1]+'* ../raw/'+i+'_R2.fastq.gz\n')
+                    cp_rawdata_file.write('#!/bin/sh\n\n#SBATCH -J '+i+'\n#SBATCH -p BP10\n#SBATCH -N 1\n#SBATCH -n 4\n\nsample='+i+'\n\nmkdir -p ../raw/bk/'+d1.loc[i][u'样本编号']+'\ncp '+parent_raw_dir+'/*'+d1.loc[i][u'样本编号']+'*/*'+md5+'* ../raw/bk/'+d1.loc[i][u'样本编号']+'/'+d1.loc[i][u'样本编号']+'.md5\ncp '+parent_raw_dir+'/*'+d1.loc[i][u'样本编号']+'*/*gz ../raw/bk/'+d1.loc[i][u'样本编号']+'/\ncp '+parent_raw_dir+'/*'+d1.loc[i][u'样本编号']+'*/*'+d1.loc[i][u'样本编号']+'*'+origin.split(' ')[0]+'* ../raw/'+i+'_R1.fastq.gz\ncp '+parent_raw_dir+'/*'+d1.loc[i][u'样本编号']+'*/*'+d1.loc[i][u'样本编号']+'*'+origin.split(' ')[1]+'* ../raw/'+i+'_R2.fastq.gz\n')
+                    cp_rawdata_file.close()
+            	for i in range(len(d1[u'样本编号'])):
+            		for j in range(2):
+            			ofile.write('cp '+parent_raw_dir+'/*'+d1[u'样本编号'][i]+'*/*'+d1[u'样本编号'][i]+'*'+origin.split(' ')[j]+'* raw/'+ID[i]+'_R'+str(j+1)+'.fastq.gz;')
+            		ofile.write('\n')
+        else:
+            parent_raw_dir = raw_input('please enter the parent directory:  ')
+            for i in d1[u'样本编号']:
+                rawdata_dir = parent_raw_dir+'/'+i
+                os.system('ls '+rawdata_dir)
+            origin = raw_input('please enter the pattern of R1 and R2:  ')
+            d1.index = d1['sample']
+            for i in d1['sample']:
+                if not os.path.exists(str(i)):
+                    os.mkdir(str(i))
+                cp_rawdata_file = open(str(i)+'/cp_rawdata.sh','w')
+                cp_rawdata_file.write('#!/bin/sh\n\n#SBATCH -J '+i+'\n#SBATCH -p BP10\n#SBATCH -N 1\n#SBATCH -n 4\n\nsample='+i+'\n\ncp '+parent_raw_dir+'/'+d1.loc[i][u'样本编号']+'/*'+d1.loc[i][u'样本编号']+'*'+origin.split(' ')[0]+'* ../raw/'+i+'_R1.fastq.gz\ncp '+parent_raw_dir+'/'+d1.loc[i][u'样本编号']+'/*'+d1.loc[i][u'样本编号']+'*'+origin.split(' ')[1]+'* ../raw/'+i+'_R2.fastq.gz\n')
+                cp_rawdata_file.close()
+            for i in range(len(d1[u'样本编号'])):
+                for j in range(2):
+                    ofile.write('cp '+parent_raw_dir+'/'+d1[u'样本编号'][i]+'/*'+d1[u'样本编号'][i]+'*'+origin.split(' ')[j]+'* raw/'+ID[i]+'_R'+str(j+1)+'.fastq.gz;')
+                ofile.write('\n')
+    ofile.close()
+
+
+    #### step2: calculate Reads(M) bases(Mb) Q30
+    print d1[d1.columns.tolist()[16:19]]
+    wrong_header = d1.columns.tolist()[16:19]
+    #right_header = ['Reads(M)','bases(Gb)','Q30']
+    right_header = ['Reads','bases(Gb)','Q30']
+    for i in range(len(wrong_header)):
+        d1.rename(columns={wrong_header[i]:right_header[i]}, inplace=True)
+    ##header_truth1 = raw_input('Is the header true, Reads(M) bases(Gb) Q30, if not, please enter the wrong ones,delimited by comma:')
+    #header_truth1 = raw_input('Is the header true, Reads bases(Gb) Q30, if not, please enter the wrong ones,delimited by comma:')
+    #if header_truth1 != 'yes':
+    #    wrong_header = header_truth1.split(',')
+    #    right_header = raw_input('Please enter the right ones:')
+    #    right_header = right_header.split(' ')
+    #    for i in range(len(wrong_header)):
+    #        d1.rename(columns={wrong_header[i]:right_header[i]}, inplace=True)
+
+    #header_truth2 = raw_input('Do Reads(M) bases(Gb) Q30 need to be calculated?')
+    header_truth2 = raw_input('Do Reads bases(Gb) Q30 need to be calculated?')
+    if header_truth2 != 'no':
+        if u')' in sn:
+            outfile = sn.split(u')')[0]+'\)'+sn.split(u')')[1]
+            os.system('python /DATA/sslyu/trio_BWA-GATK_3.0/fqstat.py -sn '+outfile)
+        elif 'tmp' in sn:
+            os.system('python /DATA/sslyu/trio_BWA-GATK_3.0/fqstat.py -sn '+sn)
+        ##print unicode(' '.join(d1.columns.tolist()), "utf-8")
+    if 'tmp' not in sn:            
+        if u')' in sn:
+            infile = sn.split(')')[0]+u'）'+sn.split(')')[1]
+        else:
+            infile = sn
+        d1.to_csv(infile+'.tmp', index=None, sep="\t", encoding='utf-8') #Maybe the encoding should be considered?
+
+    ##### step3: generate cmd files
+    pedigree_dict = generate_pedigree(d1)
+    trio = generate_trio(pedigree_dict)
+    
+    for i in d1['sample']:
+    	if not os.path.exists(str(i)):
+    		os.mkdir(str(i))
+    truth = raw_input('Do you need to generate cmd files?')
+    if truth != 'no':
+        n = 0
+        with open('/DATA/sslyu/trio_BWA-GATK_3.0/run2_sentieon.sh') as f:
+        	for l in f:
+        		n = n+1
+        		if n>22 and n<=30:
+        			print l
+
+        single = generate_single(d1)
+        d1.index = d1[u'姓名']
+        if len(single) > 0:
+            single_ID = [d1.loc[i]['sample'] for i in single]
+            list_single = open('list_single', 'w')
+            for i in single_ID:
+                list_single.write(str(i)+'\n')
+            list_single.close()
+            #cmd_single_step1 = raw_input('select cmds from following for step1 of single (qc clean mapping precalling calling gvcf gtgvcf vqsr/hardfilt left-normalize annotation depth qcsum qcvcf): ')
+            #cmd_single_step2 = raw_input('select cmds from following for step2 of single (qc clean mapping precalling calling gvcf gtgvcf vqsr/hardfilt left-normalize annotation depth qcsum qcvcf): ')
+            #for i in single_ID:
+            #    generate_single_cmd_step1(str(i))
+            #    generate_single_cmd_step2(str(i))
+            #    generate_sinle_ped(str(i),d1)
+            #    generate_run2_sentieon_step1(str(i),cmd_single_step1)
+            #    generate_run2_sentieon_step2(str(i),cmd_single_step1)
+            #    #os.system('sh sub_sep.sh '+i)
+            cmd_single = raw_input('select cmds from following for single (qc clean mapping precalling calling gvcf index gtgvcf vqsr/hardfilt left-normalize annotation depth qcsum qcvcf): ')
+            for i in single_ID:
+                generate_single_cmd(str(i))
+                generate_sinle_ped(str(i),d1)
+                generate_run2_sentieon(str(i),cmd_single)
+        if len(trio) > 0:
+            cmd_trio = raw_input('select cmds from following for trio (qc clean mapping precalling gvcf index depth qcsum): ')
+            list_trio = open('list_trio', 'w')
+            for k in pedigree_dict:
+                trio_k_ID = []
+                for i in pedigree_dict[k]:
+                    trio_k_ID.append(d1.loc[i]['sample'])
+                for i in trio_k_ID:
+                    list_trio.write(str(i)+'\n')
+                    generate_cmd(str(i))
+                    generate_run2_sentieon(str(i),cmd_trio)
+                #os.system('sh sub_sep.sh '+i)
+            list_trio.close()
+##########################need to wait the last sub_sep.sh to complete############################                       
+#### step4:trio_ped_analysis                    
+            #generate_ped(k,d1)
+            #generate_peddy(trio,d1)
+            #k_ID = d1.loc[k]['sample']
+            #mkdir -p trio/k_ID
+            #for i in trio_K_ID:
+            #    os.system('cp '+i+'/3_variants/gvcf/* trio/gvcf')
+            #os.system('sh trio/sub_sep.sh '+k) 
+            #os.system('sh trio/sub_sep.sh peddy')
+##############################################################################################
+
+    ###### step5: generate related files and dirs
+    d1_tmp = d1[[u'样本编号', u'原始样本ID']]
+    d1_tmp.to_csv('rename', index=None, header=None, sep="\t")
+    if not os.path.exists('annotation'):
+        os.mkdir('annotation')
+    os.system('mkdir -p trio/{gvcf,ped}')
+    os.system('cp /DATA/sslyu/trio_BWA-GATK_3.0/trio/gvcf.py trio')
+    d1['sample'].to_csv('list'+str(list.index(sn)), header=None, index=None)
+    os.system('cat list'+str(list.index(sn))+' >> list')
+    os.system('rm list'+str(list.index(sn)))
+    os.system('cp /DATA/sslyu/trio_BWA-GATK_3.0/single_sex_check.sh .')
+
+os.system('sort list |uniq > tmp; mv tmp list')                
+if os.path.getsize('step1_prepare.sh') == 0:
+    os.system('rm step1_prepare.sh')
+if os.path.exists('step1_prepare.sh'):    
+    with open('step1_prepare.sh') as f:
+    	for l in f:
+    		print l.strip('\n')
+    #truth = raw_input('Is the shell script correct? If not, please enter no: ')
+    #if truth != '':
+    #	sys.exit()
+    #else:
+    #	os.system('bash step1_prepare.sh')

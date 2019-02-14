@@ -1,0 +1,16 @@
+#annotation with vep:
+variant_effect_predictor.pl -i 16N0315.vcf -o 16N0315.vep --cache --offline --dir /SSD750/PB3/db3/Homo/vep/ --sift b --polyphen b --symbol --canonical --force
+
+--plugin Condel: not work now! lack of database :http://bg.upf.edu/fannsdb/download: pguo@basepair.cn/bp110110
+
+
+
+
+
+#mendelscan:
+java -jar /SSD750/PB1/soft1/MendelScan.v1.2.1.jar score 16N0315.vcf --vep-file 16N0315.vep --ped-file 16N0315.ped --output-file 16N0315.tsv --output-vcf 16N0315.mendel.vcf --inheritance recessive
+
+
+[::]分别以不同的遗传模式来注释，然后合并信息。
+
+[::]然后重新用annovar注释

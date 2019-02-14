@@ -1,0 +1,91 @@
+part1.常规分析
+
+1. 确认所有相关脚本(*.py *.sh)具有可执行权限
+
+2. 建立处理批次目录，比如 20170519
+   建立raw目录，bk目录：20170519/raw，20170519/raw/bk
+   将原始数据整理并放到bk目录下，要求每个样本一个目录，每个样本目录下包含压缩的数据和md5，比如：
+   20170519/raw/bk/17N0269				样本目录
+   ├── 17N0269.md5					md5文件
+   ├── 17N0269_S1_L005_R1_001.fastq.gz		第一个下划线以前为样本名
+   └── 17N0269_S1_L005_R2_001.fastq.gz
+   将原始数据拷贝一份到raw目录，并解压，所有文件放一起，比如：
+   20170519/raw
+   ├── 17N0269_S1_L005_R1_001.fastq
+   ├── 17N0269_S1_L005_R2_001.fastq
+   ├── 17N0270_S2_L005_R1_001.fastq
+   ├── 17N0270_S2_L005_R2_001.fastq
+   ├── 17N0271_S3_L005_R1_001.fastq
+   ├── 17N0271_S3_L005_R2_001.fastq
+
+3. 在批次目录下建立list文件，文件内包含需要提交分析的样本名，样本名为样本数据名第一个下横线之前的部分，比如：
+   cat 20170519/list
+   17N0269
+   17N0270
+   17N0271
+
+4. 确认：
+   4.1 sub.sh 文件内是以list文件为循环控制目标的
+   4.2 cmd.sh 文件内的slurm设置，包括：队列，线程数目，（其余部分不修改）
+   4.3 dbevn.sh 文件内的环节变量，尤其是panel对应的bed文件
+   4.4 run2.sh 文件中：cmd行进行流程控制，cmd变量所赋予的关键词会按流程默认的顺序执行，每执行完成一个功能则在相应样本目录的finished文件内有所记录。
+
+5. 流程控制
+   5.1 对于single（当作单样本）处理的样本，cmd控制的流程中最终应该执行过以下功能：
+       clean mapping sorting precalling gvcf gtgvcf hardfilt(对于PANEL) vqsr(对于WXS) depth qcsum qcvcf annotation
+   5.2 对于trio（需要后续trio分析）处理的样本，cmd需要保证执行过以下功能：
+       clean mapping sorting precalling gvcf depth qcsum qcvcf
+   5.3 在批次目录中，执行sh sub.sh提交任务到slurm系统
+   5.4 流程过程验证：所有使用过GATK的分析功能中，相应slurm*.out文件中应该没有ERROR关键词(需要手动验证，eg：for i in `cat list`;do grep -c ERROR $i/slurm*;done)
+
+6. 注释与过滤(single)
+   拷贝annotation目录到批次目录中，在annotation目录中建立list文件，文件内为需要注释过滤的样本列表
+   拷贝各个样本目录中 3_variants/*.ann.hg19_multianno.txt 到annotation目录
+   执行python score_re.py生成相应.score文件 (本步骤会读取list文件)
+   执行python annotation_filt_ver2.4.py做后续注释过滤生成相应.xlsx文件 (默认读取list文件)
+   或者执行python annotation_filt_ver2.4.py -sn $samplename (只对samplename做注释过滤)
+
+
+part2.家系分析
+1. 准备文件
+   1.1 将trio目录拷贝到批次目录中，将需家系分析的样本（或者所有）的gvcf文件拷贝到trio/gvcf中。(eg: for i in `cat list`;do cp $i/3_variants/gvcf/$i.g.vcf trio/gvcf/;done  eg: for i in `cat list`;do cp $i/3_variants/gvcf/$i.g.vcf.idx trio/gvcf/;done)
+   1.2 根据样本信息，在trio/ped/下建立ped文件，每个家庭包含两个ped文件分别为：familyname.ped familyname.mendel.ped (本项目中以患病孩子的样本id作为familyname)
+   1.3 在trio/下建立list文件，此list只包含trio/ped/下的家庭名称
+   1.4 ped文件书写，见help/example.ped；以及ped_format.txt
+
+2. 确认：
+   2.1 cmd.sh 文件中设置slurm的队列，每个作业的线程(使用一个线程：#SBATCH -n 1)
+   2.2 sub.sh 文件中确认读取list文件为样本循环控制
+   2.3 执行sh sub.sh 提交作业
+
+3. 注释与过滤(trio)
+   将trio/$samplename/segtrio/下的*.ann.hg19_multianno.txt 拷贝到annotation目录
+   后续方法如前所述
+
+
+part3.交付内容
+   vcf目录：
+      如果是single流程分析的，则交付part1中的$samplename/3_variants/$samplename.vcf
+      如果是trio流程分析的，则交付part2中的trio/$samplename/sep/*.vcf
+   xlsx文件：
+      single、trio流程的样本保留他们的xlsx注释结果
+   交付信息表：
+      eg:儿童遗传病(交大附属儿医)交付信息表_panel_20170519.xlsx
+   
+
+part4.质量控制
+1. 建库与实验质控
+   包含内容：浓度,体积,质量,OD260/OD280,OD260/OD230,质检结果; reads,bases(Mb),Q30
+   数据来源：项目部
+
+2. 分析质控
+   内容：coverage1X(%),coverage20X(%),avg_depth(X),duplication(%)
+   来源：part1中depth和qcsum功能实现的，每个样本目录的2_mapping/$samplename.qcsum文件中记录
+   内容：indel(genomic),snp(genomic),ts/tv(genomic),snp(exonic),ts/tv(exonic)
+   来源：对于single流程，由part1中qcvcf功能实现，每个样本目录的3_variants/$samplename.qcvcf文件中记录
+         对于trio流程，由trio流程实现，每个家庭目录的triotmp/$familyname.qcvcf文件中记录
+
+   核心指标：
+   PANEL	coverage20X(%) >= 95  低于90时建议不交付
+   WXS		coverage20X(%) >= 90  低于89时标记有效数据量偏低，低于85时建议不交付
+

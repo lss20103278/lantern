@@ -1,0 +1,155 @@
+[full steps for this workflow]
+----------------------------------------------------------------
+使用run2.sh做常规分析，包括：
+clean			
+mapping			
+precalling
+gvcf
+gtgvcf
+hardfilt (or vqsr)
+annotation
+depth
+qcsum
+
+
+[操作]
+将原始数据解压到raw目录，每个样本命名方式满足：samplename_*R1*.fastq, samplename_*R2*.fastq (第一个下横线之前的内容为样本名)
+将需要分析的样本id录入list
+确认dbevn中的环境变量,即使用的各种数据库
+修改cmd文件中提交的队列，线程控制等
+修改run2.sh中cmd行，控制流程
+执行sh sub.sh (sub.sh中的批量提交为list文件内的样本，可修改sub.sh更换使用的list)
+
+[workflow process]
+cmd中的关键词按顺序执行。
+
+[输出]
+例：
+1.按提交的list生成samplename命名的目录(初次提交的样本)
+2.每个样本目录中：
+2.1. 1_data:clean和rawdata的qc文件
+2.2. 2_mapping:
+	*.depth 文件：使用deth功能生成的捕获深度计算文件
+	*.qcsum 文件：使用qcsum功能生成的对depth文件的统计
+	*.sort.mkdup.bam 文件：sort并且markduplication后的文件
+2.3. 3_variants:
+	gvcf 目录：使用gvcf功能时生成的g.vcf文件
+	*.vcf	文件：通过各种方法过滤后的最终的vcf文件，用不同方法时该文件会被覆盖
+	*.qcvcf	文件：使用qcvcf功能对最终vcf文件的简单统计
+	*.ann.hg19_multianno.txt	文件：annotation功能产出的注释文件
+2.4. finished	文件：记录已执行过的各个功能以及完成日期
+     slurm*	文件：slurm提交过程的输出，所有文件中不见严重的ERROR才验证为流程无错
+
+
+[pipline for panel,single] 
+cmd should include : clean mapping sorting precalling gvcf gtgvcf hardfilt annotation
+[pipline for WXS,single]
+cmd should include : clean mapping sorting precalling gvcf gtgvcf vqsr annotation
+
+[pipline for trio]
+cmd should include : clean mapping sorting precalling gvcf
+then use trio pipline, see bellow:
+
+[functions for quality contriol]
+depth 
+qcsum
+qcvcf
+
+----------------------------------------------------------------
+使用trio目录及其下的工具进行家系分析，家系分析前需要准备好相应文件。
+trio分析内容如下：
+
+0.准备文件：
+	.ped文件 （GATK使用的ped文件中表型以0表示，即不在calling过程中指定确切的患病与否,see ped_format.txt）
+	.mendel.ped文件 （mendelscan使用的pd文件中，先证者的表型以2表示，其他若是正常或者未知则以1表示，标记为正常）
+	将所有涉及的样本的.g.vcf文件拷贝到gvcf目录
+
+[操作]
+完成基础操作(到gvcf步骤完)
+完成上述准备文件
+将待分析家庭样本id录入list文件
+修改cmd的作业提交环境,以及过滤方法：hard/vqsr
+执行sh sub
+
+
+
+[workflow process]
+
+1.生成对应家系的gvcf list
+
+2.GenotypeGVCFs：从gvcf到vcf
+	in：$sn.gvcf.list
+	out: triotmp/$sn.raw.vcf
+
+3.过滤劣质variants：分hardfilt 和 VQSR，对于全外使用后者，对于panel使用前者。
+	in: triotmp/$sn.raw.vcf
+	out: triotmp/$sn.raw.snp.pass.vcf , triotmp/$sn.raw.indel.pass.vcf
+
+4.CalculateGenotypePosteriors：重新计算genotype
+	in: triotmp/$sn.raw.snp.pass.vcf , triotmp/$sn.raw.indel.pass.vcf
+	out: triotmp/$sn.snp.gt.vcf , triotmp/$sn.indel.gt.vcf
+
+5.标记lowGQ：(此步骤不会过滤掉lowGQ，仅仅会在每个样本的GT-info列里标记上lowGQ)
+	in: triotmp/$sn.snp.gt.vcf , triotmp/$sn.indel.gt.vcf
+	out: triotmp/$sn.snp.gt.flt.vcf , triotmp/$sn.indel.gt.flt.vcf
+
+6.标记家系denovo：
+	in: triotmp/$sn.snp.gt.flt.vcf , triotmp/$sn.indel.gt.flt.vcf
+	out: triotmp/$sn.snp.gt.novo.vcf , triotmp/$sn.indel.gt.novo.vcf
+
+7.合并snp/indel:
+	in: triotmp/$sn.snp.gt.novo.vcf , triotmp/$sn.indel.gt.novo.vcf
+	out: $sn.gt.vcf
+
+8.mendelscan分析+注释：
+	8.1 因为mendelscan的设计问题，需要先将一条variant纪录有多个alle的情况分割成每个alle一行，此处使用bcftools
+	8.2 vep注释
+	8.3 mendelscan分析
+	8.4 使用mendel_to_annovar 生成annovar支持的且不遗漏本分析所需内容的avinput
+	8.5 使用annovar注释
+	in: $sn.gt.vcf
+	out: segtrio/$sn.ann.hg19_multianno.txt
+
+9.将包含多样本的vcf分割成单样本的vcf：
+	in: $sn.gt.vcf
+	out: sep/*.vcf
+
+
+----------------------------------------------------------------
+注释需求与实现：
+1.将annotation目录拷贝到工作目录
+
+2.将segtrio/$sn.ann.hg19_multianno.txt(trio分析的)或者$sn/3_variants/$sn.ann.hg19_multianno.txt(single分析的)拷贝到annotation目录
+
+3.创建分析样本list
+
+4.执行python score_re.py 生成对应.score文件
+
+5.执行python annotation_filt_ver2.4.py 最后生成注释版.xlsx文件
+
+
+方法说明：
+1.score_re.py根据注释上的信息，进一步添加了疾病、评分、等信息，疾病信息来自db/gene_disease.txt，评分方法见程序
+
+2.annotation_filt_ver2.4.py根据上述注释信息，进行过滤，再注释，生成文档
+具体步骤如下：
+2.1. 保留以下功能区域的突变：'exonic','splicing','exonic;splicing',距离exon边缘10bp内的突变
+2.2. 注释本地MAF，即添加上本地人群已知位点的频率
+2.3. 注释OMIM/CHPO信息
+2.4. 根据公共数据库的人群频率1000g2014oct_all<0.05做过滤
+2.5. 过滤掉外显子区域的"synonymous SNV"
+2.6. 生成xlsx
+
+
+----------------------------------------------------------------
+质量控制
+1.run2.sh中使用depth qcsum功能，得到文件：$sn/2_mapping/$sn.qcsum
+依次得到以下信息：
+sample	1Xcov	20Xcov	AvgDepth	duplication
+
+2.run2.sh模式下使用qcvcf功能，得到文件：$sn/3_variants/$sn.qcvcf
+依次得到以下信息：
+sample	indel_genomic	snp_genomic	ts/tv_genomic	snp_exonic	ts/tv_exonic
+
+trio分析中自动进行此步，得到文件：trio/$sn/triotmp/$sn.qcvcf
+

@@ -1,0 +1,29 @@
+The PED file is a white-space (space or tab) delimited file: the first six columns are mandatory:
+
+Family ID
+Individual ID
+Paternal ID
+Maternal ID
+Sex (1=male; 2=female; other=unknown)
+Phenotype
+The IDs are alphanumeric: the combination of family and individual ID should uniquely identify a person. If an individual's sex is unknown, then any character other than 1 or 2 can be used in the fifth column.
+
+A PED file must have 1 and only 1 phenotype in the sixth column. The phenotype can be either a quantitative trait or an "affected status" column: GATK will automatically detect which type (i.e. based on whether a value other than 0, 1, 2 or the missing genotype code is observed).
+
+Affected status should be coded as follows:
+
+-9 missing
+0 missing
+1 unaffected
+2 affected
+If any value outside of -9,0,1,2 is detected, then the samples are assumed to have phenotype values, interpreted as string phenotype values.
+
+Note that genotypes (column 7 onwards) cannot be specified to the GATK.
+
+You can add a comment to a PED or MAP file by starting the line with a # character. The rest of that line will be ignored, so make sure none of the IDs start with this character.
+
+Each -ped argument can be tagged with NO_FAMILY_ID, NO_PARENTS, NO_SEX, NO_PHENOTYPE to tell the GATK PED parser that the corresponding fields are missing from the ped file.
+
+
+
+

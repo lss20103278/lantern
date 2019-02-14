@@ -1,0 +1,8 @@
+20190103
+	clinvar is updated to 20181225 from 20180603
+	Note: the colnames of the two versions is different, the related scripts are run2_sentieon.sh, vep-mendel.sh and annotation_filt_ver3.0.py
+	run2_sentieon.sh: line367-368
+	vep-mendel.sh: line37-38
+	annotation_filt_ver3.0.py: line215-216,457-458,505-506
+
+	

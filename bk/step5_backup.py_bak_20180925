@@ -1,0 +1,101 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+import os
+import sys
+import pandas as pd
+
+ofile = open('step5_backup.sh', 'w')
+dirname = os.getcwd().split('/')[-2:]
+filelist = os.listdir('.')
+infile = ''
+for i in filelist:
+    if '交付信息表' in i:
+        break
+	#if '分析任务单' in i:
+	#	seperator = '分析任务单'
+	#	break
+	#if '产品信息' in i:
+	#	seperator = '产品信息'
+	#	break
+infile = i
+
+#ofile.write('mkdir -p raw/bk\n')
+#
+#d1 = pd.read_excel(infile)
+#sample_ID = d1[u'样本编号']
+#ofile.write('for i in '+' '.join(sample_ID)+'; do mkdir -p raw/bk/$i; cp raw/*$i*gz raw/bk/; awk \'{if(match($2,\"\'$1\'\")){print $0}}\' raw/md5sum.txt > raw/bk/$i/$i.md5; done\n')
+
+kwargs_raw = sys.argv[1:]
+kwargs={'-sn':'', '-l':'', '-mode':'merge', '-strategy':'WES', '-filtmode':'vqsr', '-gvcf':'no'}
+for i in range(len(kwargs_raw)):
+    for j in kwargs.keys():
+        if(kwargs_raw[i]==j):
+            kwargs.update({j:kwargs_raw[i+1]})
+
+#read sample list
+if(kwargs.get('-sn')!=''):
+    list=[]
+    list.append(kwargs.get('-sn'))
+    print "\nNote:sigle sample mode"
+else:
+    if kwargs.get('-l')!='':
+        list=pd.read_table(kwargs.get('-l'),header=None)[0].tolist()
+        print "\nNote:list samples mode"
+
+for sn in list:
+    strategy = os.getcwd().split('/')[-1].split('_')[-1]
+    print strategy
+    truth = raw_input('Is the strategy correct? If not, please enter the correct strategy(WES PANEL Agilent-PANEL IDT-PANEL Agilent-wes): ')
+    if truth != '':
+    	if truth != 'yes':
+    		strategy = truth
+    if strategy == 'WES' or strategy == 'wes':
+    	ofile.write('mv raw/bk/* /anaData/anaData004/children_hos_genetic/rawdata/2018/WES/\n')
+    elif strategy == 'Agilent-wes':
+    	ofile.write('mv raw/bk/* /anaData/anaData004/children_hos_genetic/rawdata/2018/Agilent_wes/\n')
+    elif strategy == 'IDT-PANEL':
+        ofile.write('mv raw/bk/* /anaData/anaData004/children_hos_genetic/rawdata/2018/IDT_PANEL/\n')
+    else:
+    	ofile.write('mv raw/bk/* /anaData/anaData004/children_hos_genetic/rawdata/2018/PANEL/\n')
+    ofile.write('rm -r raw/bk\n')
+    ofile.write('for i in `cat list`; do rm -r $i/1_data; rm $i/3_variants/*bam*; done\n')
+    ofile.write('mkdir -p '+dirname[-1]+'/vcf\n')
+    if os.path.exists('annotation/list_all'):
+        if os.path.exists('trio'):
+            ofile.write('for i in `cat trio/list |sed \'$d\'`; do cp trio/$i/sep/*vcf '+dirname[-1]+'/vcf; done\n')
+            ofile.write('for i in `cat annotation/list_all <(sed \'$d\' trio/list) |sort |uniq -u`; do cp $i/3_variants/$i.vcf '+dirname[-1]+'/vcf; done\n')
+        else:
+            ofile.write('for i in `cat annotation/list_all`; do cp $i/3_variants/$i.vcf '+dirname[-1]+'/vcf; done\n')
+    else:
+        if os.path.exists('trio'):
+            ofile.write('for i in `cat trio/list |sed \'$d\'`; do cp trio/$i/sep/*vcf '+dirname[-1]+'/vcf; done\n')
+            ofile.write('for i in `cat annotation/list <(sed \'$d\' trio/list) |sort |uniq -u`; do cp $i/3_variants/$i.vcf '+dirname[-1]+'/vcf; done\n')
+        else:
+            ofile.write('for i in `cat annotation/list`; do cp $i/3_variants/$i.vcf '+dirname[-1]+'/vcf; done\n')
+    #ofile.write('cp '+infile.split(seperator)[0]+'交付信息表*xlsx '+dirname[-1]+'\n')
+    ofile.write('cp '+sn+' '+dirname[-1]+'\n')
+    ofile.write('cp annotation/*_v3.0.xlsx '+dirname[-1]+'\n')
+    #ofile.write('python ~/trio_BWA-GATK_3.0/check.py -sn '+infile+'\n')
+    ofile.write('if [ ! -e /DATA/BPshare/opm/遗传病-交大附属儿医/2018/'+dirname[-2]+' ]\n')
+    ofile.write('then\n')
+    ofile.write('mkdir -p /DATA/BPshare/opm/遗传病-交大附属儿医/2018/'+dirname[-2]+'\n')
+    ofile.write('fi\n')
+    ofile.write('cp -r '+dirname[-1]+' /DATA/BPshare/opm/遗传病-交大附属儿医/2018/'+dirname[-2]+'\n')
+    ofile.write('zip -r '+dirname[-1]+'.zip '+dirname[-1]+'\n')
+    ofile.write('mkdir bam\n')
+    ofile.write('cp list bam/list_'+dirname[-1]+'\n')
+    ofile.write('for i in `cat list`; do mv $i/2_mapping/$i.sort.mkdup.bam* bam; done\n')
+    ofile.write('for i in `cat list`; do rm $i/2_mapping/$i.sort.bam*; done\n')
+    ofile.write('scp bam/* klyang@122.112.248.194:/media/bpdata/data/exon_temp2/\n')
+    ofile.close()
+    
+    #ofile.write('rm -r '+dirname[-1]+'\n')
+    with open('step5_backup.sh') as f:
+    	for l in f:
+    		print l.strip('\n')
+    truth = raw_input('Is the shell script right? If not, please enter no: ')
+    if truth != '':
+    	sys.exit()
+    else:
+    	os.system('bash step5_backup.sh')
